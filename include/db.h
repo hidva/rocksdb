@@ -22,6 +22,7 @@ class WriteBatch;
 // Some internal types.  Clients should ignore.
 class WriteBatchInternal;
 
+// 按我理解 Range 应该表示的是 key range. 即 range 中每一个元素都是一个 key. [start, limit).
 struct Range {
   Slice start;
   Slice limit;
@@ -110,6 +111,8 @@ class DB {
   // sizes will be one-tenth the size of the corresponding user data size.
   //
   // The results may not include the sizes of recently written data.
+  //
+  // Q: 语义不是很理解, 只根据 key range 如何估算大小?
   virtual void GetApproximateSizes(const Range* range, int n,
                                    uint64_t* sizes) = 0;
 
@@ -121,6 +124,9 @@ class DB {
   DB(const DB&);
   void operator=(const DB&);
 };
+
+// Q: 既然上面的 DB class 仅是一个 interface, 那么 DestroyDB(), RepairDB() 是如何得到 name 对应 db 对应
+// 的 DB implemention 的呢?
 
 // Destroy the contents of the specified database.
 // Be very careful using this method.

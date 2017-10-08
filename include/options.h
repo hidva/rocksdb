@@ -153,7 +153,7 @@ struct ReadOptions {
 
   // If "snapshot" is non-NULL, read as of the supplied snapshot
   // (which must belong to the DB that is being read and which must
-  // not have been released).  If "snapshot" is NULL, use an impliicit
+  // not have been released).  If "snapshot" is NULL, use an implicit
   // snapshot of the state at the beginning of this read operation.
   // Default: NULL
   const Snapshot* snapshot;
@@ -183,7 +183,7 @@ struct WriteOptions {
   // If "post_write_snapshot" is non-NULL, and the write succeeds,
   // *post_write_snapshot will be modified to point to a snapshot of
   // the DB state immediately after this write.  The caller must call
-  // DB::ReleaseSnapshot(*post_write_snapshotsnapshot) when the
+  // DB::ReleaseSnapshot(*post_write_snapshot) when the
   // snapshot is no longer needed.
   //
   // If "post_write_snapshot" is non-NULL, and the write fails,

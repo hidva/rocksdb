@@ -33,10 +33,21 @@ enum ValueType {
 // ValueType, not the lowest).
 static const ValueType kValueTypeForSeek = kTypeLargeValueRef;
 
+// kValueTypeForSeek 的语义大概了解了, 可以从 iterator.Seek() 操作的大概实现, InternalKey 的 total
+// order 来理解当使用 kTypeDeletion, kTypeValue 作为 kValueTypeForSeek 时会导致哪些 bug, 从而只能使用
+// kTypeLargeValueRef 作为 kValueTypeForSeek.
+//
+// Q: 按我理解 ValueType 是 value 的 metainfo, 为啥要把 ValueType 编码到 InternalKey 中?
+
+// Q: 为啥需要 SequenceNumber, 按我理解是为了实现 mvcc.
 typedef uint64_t SequenceNumber;
 
 // We leave eight bits empty at the bottom so a type and sequence#
 // can be packed together into 64-bits.
+//
+// leveldb 使用 64 bit 来存放 seqence# 与 valueType. 其中 valuetype 需要 8bit, 所以 sequence# 可以使用
+// 56 bit, 所以 max sequence# 是 2 ^ 56 - 1. valuetype, sequence# 具体 layout 参见
+// PackSequenceAndType().
 static const SequenceNumber kMaxSequenceNumber =
     ((0x1ull << 56) - 1);
 
@@ -52,6 +63,7 @@ struct ParsedInternalKey {
 };
 
 // Return the length of the encoding of "key".
+// 完全可以作为 ParsedInternalKey 的成员函数么这个.
 inline size_t InternalKeyEncodingLength(const ParsedInternalKey& key) {
   return key.user_key.size() + 8;
 }

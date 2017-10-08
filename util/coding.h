@@ -3,8 +3,11 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 //
 // Endian-neutral encoding:
-// * Fixed-length numbers are encoded with least-significant byte first
-// * In addition we support variable length "varint" encoding
+// * Fixed-length numbers are encoded with least-significant byte first. 即小端模式.
+//
+// Q: 为啥不采用网络字节序? 这样在 EncodeFixed32/64() 时还可以使用库函数 ntohl() 等能提高点效率.
+//
+// * In addition we support variable length "varint" encoding. 编码规则类似 utf-8, 具体参见代码.
 // * Strings are encoded prefixed by their length in varint format
 
 #ifndef STORAGE_LEVELDB_UTIL_CODING_H_
@@ -67,6 +70,12 @@ inline uint32_t DecodeFixed32(const char* ptr) {
             | (static_cast<uint32_t>(ptr[2]) << 16)
             | (static_cast<uint32_t>(ptr[3]) << 24));
   }
+  // 按我理解这里可以优化如下:
+  // memcpy(&result, ...)
+  // if (!port::kLittleEndian) {
+  //    bswap result // 即使用 cpu 指令来交换字节序.
+  // }
+  // 根据 gcc optimizes memcpy to a plain load 的说法, 这里大概需要 3 条指令左右的样子.
 }
 
 inline uint64_t DecodeFixed64(const char* ptr) {
@@ -89,6 +98,8 @@ extern const char* GetVarint32PtrFallback(const char* p,
 inline const char* GetVarint32Ptr(const char* p,
                                   const char* limit,
                                   uint32_t* value) {
+  // 直接 return GetVarint32PtrFallback(p, limit, value); 是可以的.
+  // 这里加这么多戏是图啥呢? 按我理解直接把 GetVarint32PtrFallback() 的实现放在这里就行了.
   if (p < limit) {
     uint32_t result = *(reinterpret_cast<const unsigned char*>(p));
     if ((result & 128) == 0) {

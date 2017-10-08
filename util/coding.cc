@@ -18,6 +18,8 @@ void EncodeFixed32(char* buf, uint32_t value) {
 }
 
 void EncodeFixed64(char* buf, uint64_t value) {
+// 这里的判断应该使用 port_example 中定义的 kLittleEndian 更合适.
+// 就像 DecodeFixed32() 中那样.
 #if __BYTE_ORDER == __LITTLE_ENDIAN
   memcpy(buf, &value, sizeof(value));
 #else
@@ -82,6 +84,7 @@ char* EncodeVarint64(char* dst, uint64_t v) {
   static const int B = 128;
   unsigned char* ptr = reinterpret_cast<unsigned char*>(dst);
   while (v >= B) {
+    // 按我理解在 C++11 里, 这里等同于 *(ptr++) = v | B
     *(ptr++) = (v & (B-1)) | B;
     v >>= 7;
   }
