@@ -8,16 +8,16 @@ CC = g++
 #OPT = -O2 -DNDEBUG
 OPT = -g2
 
-CFLAGS = -c -DLEVELDB_PLATFORM_POSIX -I. -std=c++0x $(OPT)
+CFLAGS = -pthread -c -DLEVELDB_PLATFORM_POSIX -I. -std=c++0x $(OPT)
 
-LDFLAGS=-lpthread
+LDFLAGS= -pthread
 
 LIBOBJECTS = \
 	./db/builder.o \
 	./db/db_impl.o \
 	./db/db_iter.o \
 	./db/filename.o \
-	./db/format.o \
+	./db/dbformat.o \
 	./db/log_reader.o \
 	./db/log_writer.o \
 	./db/memtable.o \
