@@ -1,3 +1,4 @@
+Makefile
 db/builder.cc
 db/builder.h
 db/corruption_test.cc
@@ -102,4 +103,3 @@ util/testharness.cc
 util/testharness.h
 util/testutil.cc
 util/testutil.h
-Makefile
