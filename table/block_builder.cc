@@ -6,6 +6,10 @@
 //
 // When we store a key, we drop the prefix shared with the previous
 // string.  This helps reduce the space requirement significantly.
+//
+// significantly? 尤其是哪些基于 rocksdb 实现的分布式 sql 系统, 这些 sql 系统在使用 rocksdb 时, key 基本上都
+// 具有相同的 prefix.
+//
 // Furthermore, once every K keys, we do not apply the prefix
 // compression and store the entire key.  We call this a "restart
 // point".  The tail end of the block stores the offsets of all of the
@@ -26,6 +30,19 @@
 //     num_restarts: uint32
 // restarts[i] contains the offset within the block of the ith restart point.
 
+/*
+ * 按我理解. 根据 restart point 进行 binary search 的算法:
+ *
+ * 1. 使用 Binary search 算法在一堆 restart point 之间找到最后一个 restart point pi, 其中 pi 对应的 key
+ *    < find_key; 若不存在这样的 pi, 则 pi = 0;
+ * 2. 遍历 [pi, pi + 1), 若不存在 find_key, 则表明 find_key 就真的是不存在了.
+ *
+ * 由于采用了 prefix-compressed, 所以只有 restart point 对应的 key 才是完整的 key, 其他地方的 key 需要往前
+ * 遍历才能拼接出完整的 key.
+ *
+ * 如果没有 restart point, 那么估计只能通过遍历来查找 key 是否存在了, 所以这大概就是 restart point 存在的原因了.
+ */
+
 #include "table/block_builder.h"
 
 #include <algorithm>
@@ -42,6 +59,8 @@ BlockBuilder::BlockBuilder(const Options* options)
       counter_(0),
       finished_(false) {
   assert(options->block_restart_interval >= 1);
+  // 按照我的理解, 0 作为默认 restart point 可以不放在 restarts_ 中, 这样一个 block 可以节省 4 bytes.
+  // 四舍五入就是一个亿啊同志们.
   restarts_.push_back(0);       // First restart point is at offset 0
 }
 
@@ -83,6 +102,8 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
     while ((shared < min_length) && (last_key_[shared] == key[shared])) {
       shared++;
     }
+    // 按我理解当 shared 为 0 的时候, 我们也应该进行 restart point 的.
+    // 因为按我理解 restart point 越多, 在进行过 binary search 之后检索 key 的效率就越高.
   } else {
     // Restart compression
     restarts_.push_back(buffer_.size());
@@ -100,6 +121,7 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
   buffer_.append(value.data(), value.size());
 
   // Update state
+  // 这么讲究. 我的实现本来是直接 last_key_.assign(key);
   last_key_.resize(shared);
   last_key_.append(key.data() + shared, non_shared);
   assert(Slice(last_key_) == key);

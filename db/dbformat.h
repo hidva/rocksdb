@@ -51,6 +51,9 @@ typedef uint64_t SequenceNumber;
 static const SequenceNumber kMaxSequenceNumber =
     ((0x1ull << 56) - 1);
 
+
+// InternalKey, UserKey; 按我理解: InternalKey 与 UserKey 一一对应, InternalKey 在 UserKey 基础之上添加了
+// 若干与 UserKey 相关的元信息.
 struct ParsedInternalKey {
   Slice user_key;
   SequenceNumber sequence;
@@ -151,7 +154,12 @@ inline int InternalKeyComparator::Compare(
 // files stored in the database, and the raw binary form is stored as
 // the iter->value() result for values of type kTypeLargeValueRef in
 // the table and log files that make up the database.
+//
+// 按我理解在对 table file, log file 进行遍历时, iter->key() 的类型是 ParsedInternalKey, iter->value()
+// 的类型根据 iter->key().type 来定; 如当 iter->key().type 是 kTypeLargeValueRef 时, iter->value() 是
+// LargeValueRef 的 raw binary form.
 struct LargeValueRef {
+  // 按我理解我觉得这里应该把 LargeValueRef 的数据成员拆开放置. 而不是直接放到序列化后的字节数组中.
   char data[29];
 
   // Initialize a large value ref for the given data
@@ -180,6 +188,7 @@ struct LargeValueRef {
   bool operator==(const LargeValueRef& b) const {
     return memcmp(data, b.data, sizeof(data)) == 0;
   }
+  // 按我理解 operator< 语义上没啥意义.
   bool operator<(const LargeValueRef& b) const {
     return memcmp(data, b.data, sizeof(data)) < 0;
   }
@@ -187,10 +196,12 @@ struct LargeValueRef {
 
 // Convert the large value ref to a human-readable string suitable
 // for embedding in a large value filename.
+// 应该作为成员函数.
 extern std::string LargeValueRefToFilenameString(const LargeValueRef& h);
 
 // Parse the large value filename string in "input" and store it in
 // "*h".  If successful, returns true.  Otherwise returns false.
+// 应该作为类的 static 成员函数.
 extern bool FilenameStringToLargeValueRef(const Slice& in, LargeValueRef* ref);
 
 inline bool ParseInternalKey(const Slice& internal_key,
@@ -202,6 +213,7 @@ inline bool ParseInternalKey(const Slice& internal_key,
   result->sequence = num >> 8;
   result->type = static_cast<ValueType>(c);
   result->user_key = Slice(internal_key.data(), n - 8);
+  // 这里应该使用类似 IsValidValueType() 来判断的.
   return (c <= static_cast<unsigned char>(kTypeLargeValueRef));
 }
 

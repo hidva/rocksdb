@@ -22,6 +22,8 @@ class Block {
   ~Block();
 
   size_t size() const { return size_; }
+  // QA: 为何这里还要传入 comparator, Block 本身不就是有序的了么.
+  // A: 因为 Iterator->Seek() 接口需要比较操作. 所以需要传入.
   Iterator* NewIterator(const Comparator* comparator);
 
  private:

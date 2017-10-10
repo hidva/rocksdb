@@ -117,6 +117,8 @@ struct Options {
   // leave this parameter alone.
   //
   // Default: 16
+  //
+  // block_restart_interval 的语义参见 block_builder.cc; 我一开始理解错了.
   int block_restart_interval;
 
   // Compress blocks using the specified compression algorithm.  This

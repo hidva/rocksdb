@@ -27,6 +27,11 @@ Block::Block(const char* data, size_t size)
   } else {
     restart_offset_ = size_ - (1 + NumRestarts()) * sizeof(uint32_t);
     if (restart_offset_ > size_ - sizeof(uint32_t)) {
+      // QA: 这里应该是 restart_offset_ > size_ - 2 * sizeof(uint32_t) 吧.
+      // 毕竟 NumRestarts() 中的 assert() 表明 NumRestarts() >= 1. 但是看 NewIterator() 的实现发现确实允许
+      // NumRestarts() 返回 0.
+      // A: 存在即合理.
+
       // The size is too small for NumRestarts() and therefore
       // restart_offset_ wrapped around.
       size_ = 0;
@@ -75,6 +80,9 @@ class Block::Iter : public Iterator {
 
   // current_ is offset in data_ of current entry.  >= restarts_ if !Valid
   uint32_t current_;
+
+  // 按我理解 restart_index_ 可以稍微加快 prev() 的实现, 但是有必要为了这一很小的速度提升而实时维护着
+  // restart_index_ 么? 在我设想的实现中是没有 restart_index_ 的.
   uint32_t restart_index_;  // Index of restart block in which current_ falls
   std::string key_;
   Slice value_;
@@ -158,6 +166,11 @@ class Block::Iter : public Iterator {
   virtual void Seek(const Slice& target) {
     // Binary search in restart array to find the first restart point
     // with a key >= target
+    //
+    // 按我理解这里应该找到最后一个 restart point, 其对应的 key <= target. 如果不存在这样的 restart point,
+    // 那么返回 0.
+    //
+    // 事实上这里的实现是存在 bug 的! rocksdb 最新版已经修复了这个 bug 了.
     uint32_t left = 0;
     uint32_t right = num_restarts_ - 1;
     while (left < right) {

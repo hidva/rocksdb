@@ -15,6 +15,11 @@
 
 namespace leveldb {
 
+
+/*
+ * Iterator 支持的模型; 其要求底层存储是有序的 key/value 对. Iterator 在这样的底层存储至上完成对 key/value
+ * 的遍历操作.
+ */
 class Iterator {
  public:
   Iterator();
@@ -35,6 +40,8 @@ class Iterator {
   // Position at the first key in the source that at or past target
   // The iterator is Valid() after this call iff the source contains
   // an entry that comes at or past target.
+  //
+  // at or past target; 意味着调用 Seek() 之后 iter->key() >= target.
   virtual void Seek(const Slice& target) = 0;
 
   // Moves to the next entry in the source.  After this call, Valid() is
@@ -67,10 +74,16 @@ class Iterator {
   //
   // Note that unlike all of the preceding methods, this method is
   // not abstract and therefore clients should not override it.
+  //
+  // 按我理解没必要 Iterator 类提供这种功能啊==
+  //
+  // RegisterCleanup() 类似 atexit(), 可以多次调用添加多个 cleaner; Iterator 对 RegisterCleanup() 的调用
+  // 顺序没有保证.
   typedef void (*CleanupFunction)(void* arg1, void* arg2);
   void RegisterCleanup(CleanupFunction function, void* arg1, void* arg2);
 
  private:
+  // 大佬就是大佬. 放着 std::list, std::stack 不用, 分分钟手写个单链表.
   struct Cleanup {
     CleanupFunction function;
     void* arg1;

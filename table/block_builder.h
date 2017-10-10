@@ -32,6 +32,7 @@ class BlockBuilder {
 
   // Returns an estimate of the current (uncompressed) size of the block
   // we are building.
+  // estimate, 大约? 可真够谦虚的, 实际上 CurrentSizeEstimate() 返回的结果就是实际 size 了.
   size_t CurrentSizeEstimate() const;
 
   // Return true iff no entries have been added since the last Reset()

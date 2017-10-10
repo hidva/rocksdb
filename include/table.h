@@ -18,6 +18,7 @@ struct ReadOptions;
 
 // A Table is a sorted map from strings to strings.  Tables are
 // immutable and persistent.
+// Q: 一个 Table 对应着一个 SST 文件.
 class Table {
  public:
   // Attempt to open the table that is stored in "file", and read the
@@ -28,7 +29,7 @@ class Table {
   // If there was an error while initializing the table, sets "*table"
   // to NULL and returns a non-ok status.  Does not take ownership of
   // "*source", but the client must ensure that "source" remains live
-  // for the duration of the returned table's lifetime.
+  // for the duration of the returned table's lifetime. 按我理解这里的 source 应该是指参数中的 file 了.
   //
   // *file must remain live while this Table is in use.
   static Status Open(const Options& options,
@@ -40,6 +41,7 @@ class Table {
   // Returns a new iterator over the table contents.
   // The result of NewIterator() is initially invalid (caller must
   // call one of the Seek methods on the iterator before using it).
+  // Q: 此时 iter->key() 对应着 InternalKey, iter->value() 根据 InternalKey.valueType 来解析.
   Iterator* NewIterator(const ReadOptions&) const;
 
   // Given a key, return an approximate byte offset in the file where

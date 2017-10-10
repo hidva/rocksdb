@@ -89,6 +89,7 @@ Options SanitizeOptions(const std::string& dbname,
                         const Options& src) {
   Options result = src;
   result.comparator = icmp;
+  // Q: 这些限制值有什么科学道理么?
   ClipToRange(&result.max_open_files,           20,     50000);
   ClipToRange(&result.write_buffer_size,        64<<10, 1<<30);
   ClipToRange(&result.large_value_threshold,    16<<10, 1<<30);
@@ -101,6 +102,7 @@ Options SanitizeOptions(const std::string& dbname,
                                         &result.info_log);
     if (!s.ok()) {
       // No place suitable for logging
+      // 日志文件都打开不了, 我觉得这里可以退出了.
       result.info_log = new NullWritableFile;
     }
   }

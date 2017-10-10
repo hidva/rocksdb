@@ -44,6 +44,7 @@ int InternalKeyComparator::Compare(const Slice& akey, const Slice& bkey) const {
   if (r == 0) {
     const uint64_t anum = DecodeFixed64(akey.data() + akey.size() - 8);
     const uint64_t bnum = DecodeFixed64(bkey.data() + bkey.size() - 8);
+    // Q: 为啥降序排序呢?
     if (anum > bnum) {
       r = -1;
     } else if (anum < bnum) {
@@ -62,6 +63,12 @@ void InternalKeyComparator::FindShortestSeparator(
   std::string tmp(user_start.data(), user_start.size());
   user_comparator_->FindShortestSeparator(&tmp, user_limit);
   if (user_comparator_->Compare(*start, tmp) < 0) {
+    // 这里应该是 Compare(*user_start, tmp); 最新 rocksdb 已经修复了这个 bug.
+
+    // 按我理解这里 tmp 属于 (user_start, user_limit) 之间, 所以我觉得这里并不一定非得是 kMaxSequenceNumber,
+    // kValueTypeForSeek. 因为这里任何 user_key 与 tmp 都不会相同, 即在 InternalKeyComparator::Compare()
+    // 时不会试图比较 sequence#.
+
     // User key has become larger.  Tack on the earliest possible
     // number to the shortened user key.
     PutFixed64(&tmp, PackSequenceAndType(kMaxSequenceNumber,kValueTypeForSeek));
@@ -140,6 +147,8 @@ bool FilenameStringToLargeValueRef(const Slice& s, LargeValueRef* h) {
       ConsumeChar(&in, '-') &&
       ConsumeDecimalNumber(&in, &ctype) &&
       in.empty() &&
+      // 如果以后新增一种压缩类型, 导致 kLightweightCompression 不是最大的了, 那么不知道要修改多少地方呢?
+      // 这里应该使用类似 IsValidCompressionType() 来判断的.
       (ctype <= kLightweightCompression)) {
     EncodeFixed64(&h->data[20], value_size);
     h->data[28] = static_cast<unsigned char>(ctype);
