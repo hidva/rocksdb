@@ -52,6 +52,7 @@ struct TableBuilder::Rep {
         num_entries(0),
         closed(false),
         pending_index_entry(false) {
+    // Q: 按我理解此举是想要更多的 restart point 从而提高 find key 的效率.
     index_block_options.block_restart_interval = 1;
   }
 };
@@ -117,6 +118,8 @@ void TableBuilder::Flush() {
   WriteBlock(&r->data_block, &r->pending_handle);
   if (ok()) {
     r->pending_index_entry = true;
+    // 按我理解, 这里 flush 是为了实现 a block is the unit of transfer to and from persistent storage
+    // 的语义.
     r->status = r->file->Flush();
   }
 }
@@ -133,6 +136,8 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   Slice block_contents;
   CompressionType type = r->options.compression;
   // TODO(postrelease): Support more compression options: zlib?
+  // 科科, 在代码里面大量使用了 <= kLightweightCompression 来判断 compress type 的合法性, 再加 compress
+  // method 不知道有多少坑.
   switch (type) {
     case kNoCompression:
       block_contents = raw;

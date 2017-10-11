@@ -21,7 +21,7 @@ struct Table::Rep {
   Options options;
   Status status;
   RandomAccessFile* file;
-  uint64_t cache_id;
+  uint64_t cache_id; // 由 Cache.NewId() 返回.
 
   BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
   Block* index_block;
@@ -93,6 +93,7 @@ static void ReleaseBlock(void* arg, void* h) {
 Iterator* Table::BlockReader(void* arg,
                              const ReadOptions& options,
                              const Slice& index_value) {
+  // 看完 BlockReader() 的实现, leveldb 怕是出现过不少次 memory leak 等问题吧==
   Table* table = reinterpret_cast<Table*>(arg);
   Cache* block_cache = table->rep_->options.block_cache;
   Block* block = NULL;
@@ -155,8 +156,12 @@ uint64_t Table::ApproximateOffsetOf(const Slice& key) const {
     Slice input = index_iter->value();
     Status s = handle.DecodeFrom(&input);
     if (s.ok()) {
+      // 在我预想的实现中, 此时会读取 handle 对应的 Block block, 然后通过 block->NewIterator()->Seek(key)
+      // 来得到 key 在 block 中的 offset, 然后忽然意识到这里得到的 offset 是 uncompress 下的, 不符合该函数
+      // 的语义了. 然后我就很好奇 leveldb 是如何实现的, 没想到 leveldb 这么粗暴!
       result = handle.offset();
     } else {
+      // 这个时候难道不应该 return Status::Corruption("bad entry in block"); 么?!
       // Strange: we can't decode the block handle in the index block.
       // We'll just return the offset of the metaindex block, which is
       // close to the whole file size for this case.

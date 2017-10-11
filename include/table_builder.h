@@ -18,6 +18,7 @@ class BlockBuilder;
 class BlockHandle;
 class WritableFile;
 
+// 这里有个更合适更简洁的实现就是采用状态机架构. 我试了一下, 比目前更简明易了.
 class TableBuilder {
  public:
   // Create a builder that will store the contents of the table it is
@@ -60,6 +61,8 @@ class TableBuilder {
   // If the caller is not going to call Finish(), it must call Abandon()
   // before destroying this builder.
   // REQUIRES: Finish(), Abandon() have not been called
+  // QA: abandon 如何处理那些已经写入到文件的内容? 还是说不做处理, 由调用 abandon 的用户处理?
+  // A: 根据实现来看, 确实没有进行任何处理, 估计是让 abandon 用户来进行处理.
   void Abandon();
 
   // Number of calls to Add() so far.

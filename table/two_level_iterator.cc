@@ -70,6 +70,8 @@ class TwoLevelIterator: public Iterator {
   IteratorWrapper data_iter_; // May be NULL
   // If data_iter_ is non-NULL, then "data_block_handle_" holds the
   // "index_value" passed to block_function_ to create the data_iter_.
+  //
+  // 我一直纳闷为啥要有这个成员变量, 参见 InitDataBlock().
   std::string data_block_handle_;
 };
 
@@ -92,6 +94,7 @@ void TwoLevelIterator::Seek(const Slice& target) {
   index_iter_.Seek(target);
   InitDataBlock();
   if (data_iter_.iter() != NULL) data_iter_.Seek(target);
+  // 想的真姬儿周到, 我就没想到 empty data block 这种可能.
   SkipEmptyDataBlocksForward();
 }
 

@@ -112,7 +112,7 @@ class DB {
   //
   // The results may not include the sizes of recently written data.
   //
-  // Q: 语义不是很理解, 只根据 key range 如何估算大小?
+  // Q: 语义不是很理解, 只根据 key range 如何估算大小? 或许可以参考一下 Table.ApproximateOffsetOf().
   virtual void GetApproximateSizes(const Range* range, int n,
                                    uint64_t* sizes) = 0;
 

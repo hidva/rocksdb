@@ -11,6 +11,8 @@ namespace leveldb {
 // caches the valid() and key() results for an underlying iterator.
 // This can help avoid virtual function calls and also gives better
 // cache locality.
+//
+// 我认为这个类没有存在的必要. 不知道这个类的存在可以让效率提升了多少?
 class IteratorWrapper {
  private:
   Iterator* iter_;

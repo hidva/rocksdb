@@ -36,6 +36,8 @@ void Footer::EncodeTo(std::string* dst) const {
   metaindex_handle_.EncodeTo(dst);
   index_handle_.EncodeTo(dst);
   dst->resize(2 * BlockHandle::kMaxEncodedLength);  // Padding
+
+  // 为啥这里不直接 PutFixed64(dst, kTableMagicNumber).
   PutFixed32(dst, static_cast<uint32_t>(kTableMagicNumber));
   PutFixed32(dst, static_cast<uint32_t>(kTableMagicNumber >> 32));
   assert(dst->size() == original_size + kEncodedLength);
