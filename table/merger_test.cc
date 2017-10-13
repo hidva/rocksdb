@@ -99,12 +99,24 @@ class MergerTest {};
 
 
 TEST(MergerTest, SomeTest) {
+    std::vector<int> expect_arrry{1, 2, 3, 4, 4, 6};
     TestIterator iter1({1, 3, 4});
     TestIterator iter2({2, 4, 6});
     std::vector<leveldb::Iterator*> iters{&iter1, &iter2};
-
     TestComparator comp;
     Iterator *merger_iter = NewMergingIterator(&comp, iters.data(), iters.size());
+
+    int idx = expect_arrry.size() - 1;
+    for (merger_iter->SeekToLast(); merger_iter->Valid(); merger_iter->Prev()) {
+        ASSERT_EQ(expect_arrry[idx], Slice2int(merger_iter->key()));
+        --idx;
+    }
+
+    idx = 0;
+    for (merger_iter->SeekToFirst(); merger_iter->Valid(); merger_iter->Next()) {
+        ASSERT_EQ(expect_arrry[idx], Slice2int(merger_iter->key()));
+        ++idx;
+    }
 
     merger_iter->SeekToLast();
     merger_iter->Prev();
