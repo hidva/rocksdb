@@ -11,6 +11,15 @@
 namespace leveldb {
 
 namespace {
+
+
+/*
+ * MergingIterator, 可以认为是个多路归并的迭代器. 可以认为是把 children, n 包含着的迭代器按照 comparator 进行
+ * 排序得到一个有序的序列, MergingIterator 就是在这个有序的序列上进行遍历.
+ *
+ * 在实现上, 我认为要遵守一个不变量 "任何一个时刻, current_->key() 始终是所有 children->key() 中最小的那个".
+ * 但是 google 并没有这么做==
+ */
 class MergingIterator : public Iterator {
  public:
   MergingIterator(const Comparator* comparator, Iterator** children, int n)
@@ -52,6 +61,8 @@ class MergingIterator : public Iterator {
     FindSmallest();
   }
 
+  // Q: Next(), Prev() 实现貌似存在 bug. 已经在 merger-test 分支写好验证程序并验证了, 但是还有一点不确定, 等待
+  // 有缘人解答==
   virtual void Next() {
     assert(Valid());
     current_->Next();
@@ -92,6 +103,8 @@ class MergingIterator : public Iterator {
   // We might want to use a heap in case there are lots of children.
   // For now we use a simple array since we expect a very small number
   // of children in leveldb.
+  //
+  // Q: 啥意思啊? simple array? 在 MergingIterator() 中不是使用 new 在 heap 上分配的内存么?!
   const Comparator* comparator_;
   IteratorWrapper* children_;
   int n_;
@@ -134,6 +147,7 @@ Iterator* NewMergingIterator(const Comparator* cmp, Iterator** list, int n) {
   if (n == 0) {
     return NewEmptyIterator();
   } else if (n == 1) {
+    // 本来我以为这里会 memory leak, 经过一番琢磨之后发现并不会==
     return list[0];
   } else {
     return new MergingIterator(cmp, list, n);
