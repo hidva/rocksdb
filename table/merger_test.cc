@@ -59,7 +59,7 @@ public:
         int t = Slice2int(target);
         // c++ 标准貌似没有规定 std::vector::iterator 差值等于 idx 哈.
         current_idx_ = std::lower_bound(data_.cbegin(), data_.cend(), t) - data_.cbegin();
-        return ; 
+        return ;
     }
 
     void Next() override {
@@ -106,8 +106,11 @@ TEST(MergerTest, SomeTest) {
     TestComparator comp;
     Iterator *merger_iter = NewMergingIterator(&comp, iters.data(), iters.size());
 
-    merger_iter->SeekToFirst();
-    ASSERT_EQ(1, Slice2int(merger_iter->key()));
+    merger_iter->SeekToLast();
+    merger_iter->Prev();
+    merger_iter->Prev();
+    merger_iter->Next();
+    ASSERT_EQ(4, Slice2int(merger_iter->key())); // failed: 4 == 6
 }
 
 }
