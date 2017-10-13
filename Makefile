@@ -8,9 +8,9 @@ CC = g++
 #OPT = -O2 -DNDEBUG
 OPT = -g2
 
-CFLAGS = -c -DLEVELDB_PLATFORM_POSIX -I. -std=c++0x $(OPT)
+CFLAGS = -pthread -c -DLEVELDB_PLATFORM_POSIX -I. -std=gnu++11 $(OPT)
 
-LDFLAGS=-lpthread
+LDFLAGS= -pthread
 
 LIBOBJECTS = \
 	./db/builder.o \
@@ -66,6 +66,7 @@ TESTS = \
 	sha1_test \
 	skiplist_test \
 	table_test \
+	merger_test \
 	version_edit_test \
 	write_batch_test
 
@@ -114,6 +115,9 @@ log_test: db/log_test.o $(LIBOBJECTS) $(TESTHARNESS)
 
 table_test: table/table_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(CC) $(LDFLAGS) table/table_test.o $(LIBOBJECTS) $(TESTHARNESS) -o $@
+
+merger_test: table/merger_test.o $(LIBOBJECTS) $(TESTHARNESS)
+	$(CC) $(LDFLAGS) table/merger_test.o $(LIBOBJECTS) $(TESTHARNESS) -o $@
 
 sha1_test: port/sha1_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(CC) $(LDFLAGS) port/sha1_test.o $(LIBOBJECTS) $(TESTHARNESS) -o $@
