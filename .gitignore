@@ -34,3 +34,11 @@ db_bench
 *.exe
 *.out
 *.app
+
+
+# QtCreator meta
+/*.config
+/*.creator
+/*.creator.user
+/*.files
+/*.includes
