@@ -18,7 +18,7 @@ int Slice2int(const leveldb::Slice &target) {
 
 class TestComparator: public leveldb::Comparator {
 public:
-    int Compare(const Slice& a, const Slice& b) const override {
+    int Compare(const leveldb::Slice& a, const leveldb::Slice& b) const override {
         return Slice2int(a) - Slice2int(b);
     }
 
@@ -26,7 +26,7 @@ public:
         return "0x66ccff";
     }
 
-    void FindShortestSeparator(std::string*, const Slice&) const override {
+    void FindShortestSeparator(std::string*, const leveldb::Slice&) const override {
     }
 
     void FindShortSuccessor(std::string*) const override {
@@ -58,7 +58,8 @@ public:
     void Seek(const leveldb::Slice& target) override {
         int t = Slice2int(target);
         // c++ 标准貌似没有规定 std::vector::iterator 差值等于 idx 哈.
-        return std::lower_bound(data_.cbegin(), data_.cend(), t) - data_.cbegin();
+        current_idx_ = std::lower_bound(data_.cbegin(), data_.cend(), t) - data_.cbegin();
+        return ; 
     }
 
     void Next() override {
@@ -72,8 +73,9 @@ public:
     }
 
     leveldb::Slice key() const override {
-        key_ = std::to_string(data_[current_idx_]);
-        return leveldb::Slice(key_);
+        // 233 内存泄露!
+        auto p = new std::string(std::to_string(data_[current_idx_]));
+        return leveldb::Slice(*p);
     }
 
     leveldb::Slice value() const override {
@@ -87,23 +89,25 @@ public:
 private:
     std::vector<int> data_;
     int current_idx_;
-
-    std::string key_;
 };
 
 
 namespace leveldb {
 
-TEST(Merger, Test) {
+
+class MergerTest {};
+
+
+TEST(MergerTest, SomeTest) {
     TestIterator iter1({1, 3, 4});
     TestIterator iter2({2, 4, 6});
-    std::vector<TestIterator*> iters{&iter1, &iter2};
+    std::vector<leveldb::Iterator*> iters{&iter1, &iter2};
 
     TestComparator comp;
     Iterator *merger_iter = NewMergingIterator(&comp, iters.data(), iters.size());
 
     merger_iter->SeekToFirst();
-    ASSERT_EQ(1, merger_iter->key());
+    ASSERT_EQ(1, Slice2int(merger_iter->key()));
 }
 
 }
