@@ -12,6 +12,9 @@ namespace leveldb {
 // A very simple random number generator.  Not especially good at
 // generating truly random bits, but good enough for our needs in this
 // package.
+//
+// 为啥啊?! 暂且不说 c++11 引入的一堆随机数生成器, 就算是 glibc 中也有不少随机数生成器, 为啥还要自己实现!?!
+// 实现未细看.
 class Random {
  private:
   uint32_t seed_;

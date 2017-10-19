@@ -10,6 +10,10 @@
 // while the read is in progress.  Apart from that, reads progress
 // without any internal locking or synchronization.
 //
+// QA: Read unlock 的实现猜测: 由于 skiplist 中要求 Read 时`从前往后`, `从上往下`读. 所以这里在实现
+// Write 时`从后往前`, `从下往上`更新, .
+// A: 我对了!
+//
 // Invariants:
 //
 // (1) Allocated nodes are never deleted until the SkipList is
@@ -34,6 +38,11 @@ namespace leveldb {
 
 class Arena;
 
+/*
+ * 之前比较纳闷为何 leveldb 不实用 std::set/std::map, 而是自己实现一套 SkipList. 现在貌似明白了, 与 std::set,
+ * std::map 在修改时需要调整大量节点相比, skiplist 在修改时需要调整的节点数较少, 所以 skiplist 在并发时性能较高,
+ * 就如上文所说: 只有写需要加锁, 读不需要加速.
+ */
 template<typename Key, class Comparator>
 class SkipList {
  private:
@@ -92,6 +101,7 @@ class SkipList {
   };
 
  private:
+  // 可以作为今后 skiplist 实现参考. leveldb 选取 12 作为 kMaxHeight 应该是有理由的吧.
   enum { kMaxHeight = 12 };
 
   // Immutable after construction
@@ -172,6 +182,9 @@ struct SkipList<Key,Comparator>::Node {
 
  private:
   // Array of length equal to the node height.  next_[0] is lowest level link.
+  //
+  // QA: node height 在哪存放?
+  // A: 纵观 skiplist 结构与实现可以看到 node height 是由外层来决定的.
   port::AtomicPointer next_[1];
 };
 
@@ -237,7 +250,23 @@ inline void SkipList<Key,Comparator>::Iterator::SeekToLast() {
 
 template<typename Key, class Comparator>
 int SkipList<Key,Comparator>::RandomHeight() {
-  // Increase height with probability 1 in kBranching
+  // Increase height with probability 1 in kBranching.
+
+  /*
+   * 我本来想的实现是:
+   *
+   *   height = rnd_.Next() % kMaxHeight + 1;
+   *   return height;
+   *
+   * 此时 height 作为随机变量, 其等于 h 的概率: 1 / kMaxHeight, 其期望: balabala...
+   *
+   * 没想到原文这里有点复杂啊. 此时 height 等于 h 的概率:
+   *    (1 / kBranching) ** (h - 1) * (kBranching - 1) / kBranching; h 属于 [1, kMaxHeight).
+   *    (1 / kBranching) ** (h - 1); h = kMaxHeight
+   *
+   * 或许只能去 skiplist 原论文中才能找到为何如此的原因了.
+   */
+
   static const unsigned int kBranching = 4;
   int height = 1;
   while (height < kMaxHeight && ((rnd_.Next() % kBranching) == 0)) {
@@ -333,6 +362,8 @@ template<typename Key, class Comparator>
 void SkipList<Key,Comparator>::Insert(const Key& key) {
   // TODO(opt): We can use a barrier-free variant of FindGreaterOrEqual()
   // here since Insert() is externally synchronized.
+  // 调用 Insert() 时, 一定在某次成功的 mutex.lock() 之后, 又因为 mutex.unlock() happens before
+  // mutex.lock(), 所以 Insert() 中所有对 AtomicPointer 的读取都可以使用 memory_order_relaxed 的语序.
   Node* prev[kMaxHeight];
   Node* x = FindGreaterOrEqual(key, prev);
 

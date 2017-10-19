@@ -12,6 +12,8 @@
 
 namespace leveldb {
 
+
+// 实现未细看.
 class Arena {
  public:
   Arena();
