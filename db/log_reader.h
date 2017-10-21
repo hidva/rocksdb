@@ -24,6 +24,7 @@ class Reader {
 
     // Some corruption was detected.  "size" is the approximate number
     // of bytes dropped due to the corruption.
+    // status 为 Reader 构建的实例用来表明 corruption 的具体情况.
     virtual void Corruption(size_t bytes, const Status& status) = 0;
   };
 
@@ -35,6 +36,7 @@ class Reader {
   // live while this Reader is in use.
   //
   // If "checksum" is true, verify checksums if available.
+  // 我本来纳闷 if available 啥意思, checksum 不是总是存在的么! 参见 ReadPhysicalRecord() 的实现可以理解.
   Reader(SequentialFile* file, Reporter* reporter, bool checksum);
 
   ~Reader();
@@ -44,18 +46,28 @@ class Reader {
   // "*scratch" as temporary storage.  The contents filled in *record
   // will only be valid until the next mutating operation on this
   // reader or the next mutation to *scratch.
+  // 根据实现, 可以看出任何 ioerror 都会被认为是 hit end of the input.
   bool ReadRecord(Slice* record, std::string* scratch);
 
  private:
   SequentialFile* const file_;
   Reporter* const reporter_;
   bool const checksum_;
+
+  /*
+   * 根据 log format 可知, log file 是由 block 组成的. 所以 Reader 的实现也是一次读取一个 block, 然后解析
+   * 这个 block.
+   *
+   * backing_store_ 指向着大小为 kBlockSize 的缓存, 用来存放一个 block 的内容. buffer_ 指向着
+   * backing_store_, 为尚未被解析的内容.
+   */
   char* const backing_store_;
   Slice buffer_;
   bool eof_;   // Last Read() indicated EOF by returning < kBlockSize
 
   // Extend record types with the following special values
   enum {
+    // kEof 表明 hit the end of file. 本来我以为 kEof 用来标识 block 中最后 7 bytes 形成的 record 呢,
     kEof = kMaxRecordType + 1,
     kBadRecord = kMaxRecordType + 2
   };

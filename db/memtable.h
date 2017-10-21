@@ -17,6 +17,10 @@ class InternalKeyComparator;
 class Mutex;
 class MemTableIterator;
 
+/*
+ * MemTable, 本质上就是 SkipList. 其 key 是 InternalKey 的序列化形式; 其 value 是用户添加的 value, 或者
+ * 为空.
+ */
 class MemTable {
  public:
   explicit MemTable(const InternalKeyComparator& comparator);

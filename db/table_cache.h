@@ -18,6 +18,10 @@ namespace leveldb {
 
 class Env;
 
+
+/*
+ * TableCache, 本质上就是一个 LRUCache. 其 key 是 file_number; 其 value 是 Table;
+ */
 class TableCache {
  public:
   TableCache(const std::string& dbname, const Options* options, int entries);

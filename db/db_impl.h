@@ -150,6 +150,7 @@ class DBImpl : public DB {
   port::AtomicPointer shutting_down_;
   port::CondVar bg_cv_;         // Signalled when !bg_compaction_scheduled_
   port::CondVar compacting_cv_;  // Signalled when !compacting_
+  // 本来我觉得这里的 last_sequence_ 是用来作为 sst table file name 的数字后缀呢, 后来发现不太可能是==
   SequenceNumber last_sequence_;
   MemTable* mem_;
   WritableFile* logfile_;
