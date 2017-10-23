@@ -42,6 +42,8 @@ class Arena;
  * 之前比较纳闷为何 leveldb 不实用 std::set/std::map, 而是自己实现一套 SkipList. 现在貌似明白了, 与 std::set,
  * std::map 在修改时需要调整大量节点相比, skiplist 在修改时需要调整的节点数较少, 所以 skiplist 在并发时性能较高,
  * 就如上文所说: 只有写需要加锁, 读不需要加速.
+ *
+ * 关于 SkipList 总体结构可以参考跳跃列表 - 维基百科.
  */
 template<typename Key, class Comparator>
 class SkipList {
@@ -112,6 +114,10 @@ class SkipList {
 
   // Modified only by Insert().  Read racily by readers, but stale
   // values are ok.
+  //
+  // 在我设想中没有用到也不需要维护 max_height_, 即总是从 kMaxHeight 开始往下遍历. 按照 leveldb 后面叙述:
+  // the reader will immediately drop to the next level since NULL sorts after all keys.
+  // 这里性能应该不会损失, 另外减少了对 max_height_ 的维护或许性能还会提升.
   port::AtomicPointer max_height_;   // Height of the entire list
 
   inline int GetMaxHeight() const {
@@ -286,6 +292,14 @@ bool SkipList<Key,Comparator>::KeyIsAfterNode(const Key& key, Node* n) const {
 template<typename Key, class Comparator>
 typename SkipList<Key,Comparator>::Node* SkipList<Key,Comparator>::FindGreaterOrEqual(const Key& key, Node** prev)
     const {
+  /*
+   * 遍历 skiplist 的套路如下:
+   *
+   * x, 遍历起始节点, x 本身已被遍历过, 无需再次遍历.
+   * level, 当前遍历层次;
+   *
+   * 然后从高到低来遍历 skiplist. 代码如下:
+   */
   Node* x = head_;
   int level = GetMaxHeight() - 1;
   while (true) {
@@ -387,6 +401,10 @@ void SkipList<Key,Comparator>::Insert(const Key& key) {
     max_height_.NoBarrier_Store(reinterpret_cast<void*>(height));
   }
 
+  /*
+   * height 决定了节点 x 会出现在那些层. 具体来说: 若从低到高层的序号依次是 1, 2, ...; height 决定了 x 会出现在
+   * [1, height] 层.
+   */
   x = NewNode(key, height);
   for (int i = 0; i < height; i++) {
     // NoBarrier_SetNext() suffices since we will add a barrier when
@@ -407,3 +425,5 @@ bool SkipList<Key,Comparator>::Contains(const Key& key) const {
 }
 
 }
+
+

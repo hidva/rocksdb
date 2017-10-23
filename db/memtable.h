@@ -27,6 +27,7 @@ class MemTable {
   //
   // REQUIRES: external synchronization to prevent simultaneous
   // operations on the same MemTable.
+  // 所以这也就是 MemTable 不是线程安全的咯, 这么重要的注释不得放在 class MemTable 处么.
   size_t ApproximateMemoryUsage();
 
   // Return an iterator that yields the contents of the memtable.
@@ -34,7 +35,7 @@ class MemTable {
   // The caller must ensure that the underlying MemTable remains live
   // while the returned iterator is live.  The keys returned by this
   // iterator are internal keys encoded by AppendInternalKey in the
-  // db/format.{h,cc} module.
+  // db/dbformat.{h,cc} module.
   Iterator* NewIterator();
 
   // Add an entry into memtable that maps key to value at the
