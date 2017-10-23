@@ -20,7 +20,7 @@ Reader::Reader(SequentialFile* file, Reporter* reporter, bool checksum)
       reporter_(reporter),
       checksum_(checksum),
       backing_store_(new char[kBlockSize]),
-      buffer_(),
+      buffer_(), // buffer_(backing_store_, 0) 更为合理我觉得.
       eof_(false) {
 }
 
@@ -83,6 +83,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
           in_fragmented_record = false;
           scratch->clear();
         }
+        // in_fragmented_record 为 False 时就不报错了?!
         break;
 
       default:
@@ -149,6 +150,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
     if (checksum_) {
       if (type == kZeroType && length == 0) {
         // Skip zero length record
+        // 换句话说此时这里就不存在 checksum.
         buffer_.remove_prefix(kHeaderSize + length);
         return kBadRecord;
       }

@@ -46,6 +46,7 @@ class PosixSequentialFile: public SequentialFile {
       if (feof(file_)) {
         // We leave status as ok if we hit the end of the file
       } else {
+        // WHY?! 只是 r < n 而已, 为啥就判定为 IOERROR 了呢!
         // A partial read with an error: return a non-ok status
         s = Status::IOError(filename_, strerror(errno));
       }
@@ -84,6 +85,21 @@ class PosixRandomAccessFile: public RandomAccessFile {
 // data to the file.  This is safe since we either properly close the
 // file before reading from it, or for log files, the reading code
 // knows enough to skip zero suffixes.
+//
+// 为什么就不能简简单单地使用 stdio 来实现呢, 非得卖弄技巧呢==.
+// 实现未细看.
+/*
+ * QA: skip zero suffixes 啥意思?
+ * A: 按我理解, 根据 PosixMmapFile 的实现可知, 文件大小比文件实际内容大小总是多一骨节, 在 PosixMmapFile 关
+ * 闭时, 会使用 truncate 来移除这多余的一骨节, 所以说 close the file before reading from it is safe!
+ * 但是对于 log file 而言, 其可能被同时进行读写, 但是根据 log_reader 如下代码可知:
+      if (type == kZeroType && length == 0) {
+        // Skip zero length record
+        buffer_.remove_prefix(kHeaderSize + length);
+        return kBadRecord;
+      }
+   log reader 会 skip zero suffixes.
+ */
 class PosixMmapFile : public WritableFile {
  private:
   std::string filename_;
@@ -105,6 +121,7 @@ class PosixMmapFile : public WritableFile {
   }
 
   size_t TruncateToPageBoundary(size_t s) {
+    // 等同于 s -= s % page_size; 很显然这里莫名假设了 page_size 一定是 2 的 n 次方!
     s -= (s & (page_size_ - 1));
     assert((s % page_size_) == 0);
     return s;
@@ -259,6 +276,9 @@ class PosixFileLock : public FileLock {
   int fd_;
 };
 
+/*
+ * PosixEnv 仅使用 1 个线程来负责处理 Env::Schedule().
+ */
 class PosixEnv : public Env {
  public:
   PosixEnv();
@@ -426,6 +446,15 @@ class PosixEnv : public Env {
 
     // We try twice: the first time with a fixed-size stack allocated buffer,
     // and the second time with a much larger dynamically allocated buffer.
+    /*
+     * 传统实现如下:
+     * char buffer[500];
+     * expect_size = snprint(...);
+     * if (expect_size >= 500) {
+     *   buffer = new char[expect_size]
+     *   snprintf(...);
+     * }
+     */
     char buffer[500];
     for (int iter = 0; iter < 2; iter++) {
       char* base;
@@ -474,6 +503,7 @@ class PosixEnv : public Env {
       }
 
       // Add newline if necessary
+      // 我第一次发现 c++ 还支持 p[-1] 这种操作!
       if (p == base || p[-1] != '\n') {
         *p++ = '\n';
       }

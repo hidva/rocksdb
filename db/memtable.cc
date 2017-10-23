@@ -9,6 +9,8 @@
 #include "include/iterator.h"
 #include "util/coding.h"
 
+// 这里真是大量使用了与 dbformat, coding 中的重复代码啊.
+
 namespace leveldb {
 
 static Slice GetLengthPrefixedSlice(const char* data) {

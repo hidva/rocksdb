@@ -33,6 +33,15 @@ class Writer {
   // crc32c values for all supported record types.  These are
   // pre-computed to reduce the overhead of computing the crc of the
   // record type stored in the header.
+  /*
+   * 首先这样无非也就减少了 1 byte 的 crc 计算量吧==. 另外下面这样不是更合适么:
+   *    static constexpr uint32_t type_crc_[] {
+   *        crc32c::Value(0),
+   *        crc32c::Value(1),
+   *        crc32c::Value(2),
+   *        ...
+   *    }
+   */
   uint32_t type_crc_[kMaxRecordType + 1];
 
   Status EmitPhysicalRecord(RecordType type, const char* ptr, size_t length);
