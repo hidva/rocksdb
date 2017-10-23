@@ -155,6 +155,7 @@ class DBImpl : public DB {
   MemTable* mem_;
   WritableFile* logfile_;
   log::Writer* log_;
+  // Q: log_number 干什么吃的?
   uint64_t log_number_;
   SnapshotList snapshots_;
 
