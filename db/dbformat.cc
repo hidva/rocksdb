@@ -44,7 +44,7 @@ int InternalKeyComparator::Compare(const Slice& akey, const Slice& bkey) const {
   if (r == 0) {
     const uint64_t anum = DecodeFixed64(akey.data() + akey.size() - 8);
     const uint64_t bnum = DecodeFixed64(bkey.data() + bkey.size() - 8);
-    // Q: 为啥降序排序呢?
+    // Q: 为啥降序排序呢? 按我理解 sequence 越大表明越新, 倒序排序可以让越新的 key 记录摆在前面.
     if (anum > bnum) {
       r = -1;
     } else if (anum < bnum) {
