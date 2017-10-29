@@ -161,8 +161,22 @@ class DBImpl : public DB {
 
   // Set of table files to protect from deletion because they are
   // part of ongoing compactions.
+  /*
+   * Q: 按我理解 pendingoutput 存放的都是文件描述符, 这样可以文件被外界删除时文件的内容不会真正的删除.
+   * 但是为啥要加这么一层保护? 如果真有人在删除就让他删除好了啊? 另外为啥要用 std::set 而不是 std::vector.
+   */
   std::set<uint64_t> pending_outputs_;
 
+  /*
+   * Q: 按我理解 leveldb 在 schedule bg compaction 之后将 bg_compaction_scheduled_ 置为 True.
+   * bg compaction 的实现可能如下:
+   *    func bg_compaction() {
+   *        compacting_ = True;
+   *        do_compaction();
+   *        compacting_ = False;
+   *        bg_compaction_scheduled_ = False;
+   *    }
+   */
   // Has a background compaction been scheduled or is running?
   bool bg_compaction_scheduled_;
 
