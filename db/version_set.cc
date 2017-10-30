@@ -71,11 +71,17 @@ Version::~Version() {
 // is the largest key that occurs in the file, and value() is an
 // 8-byte value containing the file number of the file, encoding using
 // EncodeFixed64.
+/*
+ * LevelFileNumIterator, 在了解 LevelFileNumIterator 之前首先了解一下 flist_ 是啥, flist_ 是某一 level 下
+ * 所有 table 文件的集合, 如 flist_ 可能是 version->files_[level], flist_ 中的文件按照 largest key 从小到大
+ * 排序. 所以 flist_ 像极了 table file 的 index block. LevelFileNumIterator 就是对 flist_ 的迭代,
+ * iter->Key() 是 largest key, iter->Value() 是 file number of the file.
+ */
 class Version::LevelFileNumIterator : public Iterator {
  public:
   LevelFileNumIterator(const Version* version,
                        const std::vector<FileMetaData*>* flist)
-      : icmp_(version->vset_->icmp_.user_comparator()),
+      : icmp_(version->vset_->icmp_.user_comparator()), // 为啥不写成 icmp_(version->vset_->icmp) 呢?
         flist_(flist),
         index_(flist->size()) {        // Marks as invalid
   }
@@ -129,11 +135,12 @@ class Version::LevelFileNumIterator : public Iterator {
  private:
   const InternalKeyComparator icmp_;
   const std::vector<FileMetaData*>* const flist_;
-  int index_;
+  int index_; // 当前在 flist_ 中的位置.
 
   mutable char value_buf_[8];  // Used for encoding the file number for value()
 };
 
+// 参见该函数的使用场景 NewConcatenatingIterator().
 static Iterator* GetFileIterator(void* arg,
                                  const ReadOptions& options,
                                  const Slice& file_value) {

@@ -41,11 +41,19 @@ class Version;
 class VersionSet;
 class WritableFile;
 
+
+// Version 严重依赖 VersionSet, 所以想要了解 Version, 需要先了解 VersionSet.
 class Version {
  public:
   // Append to *iters a sequence of iterators that will
   // yield the contents of this Version when merged together.
   // REQUIRES: This version has been saved (see VersionSet::SaveTo)
+  /*
+   * 这里 the contents of this Version 是指当前 Version 实例各个 level 级别下的 table file 集合. 即:
+   *    MergingIterator iter(comparator, iters->data(), iters->size());
+   * 此时 iter 产生的结果与 Table->NewIterator() 产生的结果相同, iter 将按照 key 从小到大的方式遍历所有 level
+   * 下所有 table file.
+   */
   void AddIterators(const ReadOptions&, std::vector<Iterator*>* iters);
 
   // Reference count management (so Versions do not disappear out from
@@ -61,6 +69,12 @@ class Version {
   friend class VersionSet;
 
   class LevelFileNumIterator;
+
+  /*
+   * 生成的迭代器负责迭代 flist_, 其中 flist_ = files_[level], flist_ 的语义参考 LevelFileNumIterator 的
+   * 实现. 其返回的迭代器等同于 Table->NewIterator(), 区别在于当一个 table 文件迭代完毕之后, 会跳过下一个 table
+   * 文件继续迭代.
+   */
   Iterator* NewConcatenatingIterator(const ReadOptions&, int level) const;
 
   VersionSet* vset_;            // VersionSet to which this Version belongs
@@ -200,6 +214,8 @@ class VersionSet {
   const Options* const options_;
   TableCache* const table_cache_;
   const InternalKeyComparator icmp_;
+
+  // Q: 用在哪一个地方?
   uint64_t next_file_number_;
   uint64_t manifest_file_number_;
 
@@ -214,13 +230,16 @@ class VersionSet {
   // Map from large value reference to the set of <file numbers,internal_key>
   // values containing references to the value.  We keep the
   // internal key as a std::string rather than as an InternalKey because
-  // we want to be able to easily use a set.
+  // we want to be able to easily use a set. 很显然如果使用 InternalKey, 需要重载 operator< 等运算符.
+  // Q: 为啥要保存这么些东西?
   typedef std::set<std::pair<uint64_t, std::string> > LargeReferencesSet;
   typedef std::map<LargeValueRef, LargeReferencesSet> LargeValueMap;
   LargeValueMap large_value_refs_;
 
   // Per-level key at which the next compaction at that level should start.
   // Either an empty string, or a valid InternalKey.
+  // Q: 为何需要这么个指针, 难道每次不是随机的么? 我好像知道了 VersionEdit->compact_pointers_ 的用处了, 就是
+  // 为了持久化这个数组啊.
   std::string compact_pointer_[config::kNumLevels];
 
   // No copying allowed

@@ -26,6 +26,10 @@ struct FileMetaData {
   FileMetaData() : refs(0), file_size(0) { }
 };
 
+/*
+ * Q: 按我理解, Version 相当于 manifest 文件, 而 VersionEdit 则是生成/解析 manifest 文件的工具类.
+ * 注意根据文档可知, manifest 的格式与 log file 采用的格式一致.
+ */
 class VersionEdit {
  public:
   VersionEdit() { Clear(); }
