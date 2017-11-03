@@ -33,8 +33,10 @@ static double MaxBytesForLevel(int level) {
   }
 }
 
+// 返回 level 层 table file 的最大长度, 默认是固定的 2MB.
 static uint64_t MaxFileSizeForLevel(int level) {
   return 2 << 20;       // We could vary per level to reduce number of files?
+  // 我也觉得 level 越大是不是这个值也可以适当调大点?
 }
 
 namespace {
@@ -215,6 +217,7 @@ std::string Version::DebugString() const {
   return r;
 }
 
+// Q: 不懂其意!
 // A helper class so we can efficiently apply a whole sequence
 // of edits to a particular state without creating intermediate
 // Versions that contain full copies of the intermediate state.
@@ -321,6 +324,7 @@ VersionSet::VersionSet(const std::string& dbname,
       options_(options),
       table_cache_(table_cache),
       icmp_(*cmp),
+      // Q: 这个难道不是当前存在的 Max file number + 1 么? 所以也是 Filled by Recover()?
       next_file_number_(2),
       manifest_file_number_(0),  // Filled by Recover()
       descriptor_file_(NULL),
@@ -503,7 +507,7 @@ Status VersionSet::Recover(uint64_t* log_number,
       current_->next_ = v;
       current_ = v;
       manifest_file_number_ = next_file;
-      next_file_number_ = next_file + 1;
+      next_file_number_ = next_file + 1;  // Q: 不加 1 也可以的吧?
     }
   }
 
@@ -765,6 +769,11 @@ void VersionSet::GetOverlappingInputs(
     const InternalKey& end,
     std::vector<FileMetaData*>* inputs) {
   inputs->clear();
+  /*
+   * Q: 忽然想到此时没有考虑 sequence number, 所以在 compact 时, 相同 key 之下只会保留最新的 key, 那么如果
+   * 使用老的 shapshot 是不是就读取不到 key 的存在了? 若 key#2, key#1 经过 compact 之后只剩下 key#2, 那么
+   * 使用 sequence=1 的 shapshot 读取的时候是不是就读取不到 key 了.
+   */
   Slice user_begin = begin.user_key();
   Slice user_end = end.user_key();
   const Comparator* user_cmp = icmp_.user_comparator();
@@ -780,7 +789,7 @@ void VersionSet::GetOverlappingInputs(
 }
 
 // Stores the minimal range that covers all entries in inputs in
-// *smallest, *largest.
+// *smallest, *largest. 被 minimal range 唬住了, 直接说 range 不就得了.
 // REQUIRES: inputs is not empty
 void VersionSet::GetRange(const std::vector<FileMetaData*>& inputs,
                           InternalKey* smallest,
@@ -790,7 +799,7 @@ void VersionSet::GetRange(const std::vector<FileMetaData*>& inputs,
   largest->Clear();
   for (int i = 0; i < inputs.size(); i++) {
     FileMetaData* f = inputs[i];
-    if (i == 0) {
+    if (i == 0) {  // 放到外面岂不是可以避免每次循环体内执行 if 语句.
       *smallest = f->smallest;
       *largest = f->largest;
     } else {
@@ -852,6 +861,11 @@ Compaction* VersionSet::PickCompaction() {
   for (int i = 0; i < current_->files_[level].size(); i++) {
     FileMetaData* f = current_->files_[level][i];
     if (compact_pointer_[level].empty() ||
+        // QA: compact_pointer_ 是如何更新的? 为啥选择 f->largest 来比较, 而不是 smallest?
+        // A: compact_pointer_ 如何更新, 见下. 按我理解这里也可以使用 f->smallest 来更新, 因为可以根据
+        // 下面的代码流程结合反证法证明出:
+        // 不会存在 f, 使得 compact_pointer_[level] 落在 f.smallest, f.largest 之间.
+        // 所以可以得出当 f.largest > compact_pointer[level] 时, f.smallest 也大于 compact ponter level.
         icmp_.Compare(f->largest.Encode(), compact_pointer_[level]) > 0) {
       c->inputs_[0].push_back(f);
       break;
@@ -874,14 +888,20 @@ Compaction* VersionSet::PickCompaction() {
     GetOverlappingInputs(0, smallest, largest, &c->inputs_[0]);
     assert(!c->inputs_[0].empty());
     GetRange(c->inputs_[0], &smallest, &largest);
+    // 本来我以为 level 0 直接把 level 0 的所有文件都作为 inputs_[0] 内.
   }
 
   GetOverlappingInputs(level+1, smallest, largest, &c->inputs_[1]);
 
   // See if we can grow the number of inputs in "level" without
   // changing the number of "level+1" files we pick up.
+  // 就是在 inputs_[1] 大小不变的基础上, 尽可能多地往 inputs_[0] 中塞入数据, 大概是想提高 compact 效果吧.
+  // 这里是不是可以作为一个无限循环? 在 expanded0 == inputs[0] 或者 expanded1.size() > inputs[1].size()
+  // 时才退出. 让效果最大化嘛.
   if (!c->inputs_[1].empty()) {
     // Get entire range covered by compaction
+    // 按我理解 GetRange(c->inputs_[1]) 包括了 [smallest, largest], 所以这里:
+    // [all_start, all_limit] 等于 GetRange(c->inputs_[1]).
     std::vector<FileMetaData*> all = c->inputs_[0];
     all.insert(all.end(), c->inputs_[1].begin(), c->inputs_[1].end());
     InternalKey all_start, all_limit;
@@ -889,11 +909,15 @@ Compaction* VersionSet::PickCompaction() {
 
     std::vector<FileMetaData*> expanded0;
     GetOverlappingInputs(level, all_start, all_limit, &expanded0);
+    // 此时 expanded0.size() >= inputs[0].size(), 并且当 expanded0.size() == inputs[0].size() 时,
+    // expanded0 == inputs[0]. 这是因为 [allstart, alllimit] 包括了 [smallest, largest], 所以
+    // inputs[0] 是 expanded0 的子集.
     if (expanded0.size() > c->inputs_[0].size()) {
       InternalKey new_start, new_limit;
       GetRange(expanded0, &new_start, &new_limit);
       std::vector<FileMetaData*> expanded1;
       GetOverlappingInputs(level+1, new_start, new_limit, &expanded1);
+      // 同样此时 inputs[1] 是 expanded1 的子集.
       if (expanded1.size() == c->inputs_[1].size()) {
         Log(env_, options_->info_log,
             "Expanding@%d %d+%d to %d+%d\n",
@@ -909,7 +933,7 @@ Compaction* VersionSet::PickCompaction() {
       }
     }
   }
-
+  // 此时 smallest, largest 始终等于 GetRange(inputs[0]).
   if (false) {
     Log(env_, options_->info_log, "Compacting %d '%s' .. '%s'",
         level,
@@ -920,8 +944,9 @@ Compaction* VersionSet::PickCompaction() {
   // Update the place where we will do the next compaction for this level.
   // We update this immediately instead of waiting for the VersionEdit
   // to be applied so that if the compaction fails, we will try a different
-  // key range next time.
+  // key range next time. Q: 由于对 compaction 的整体流程不理解, 所以这句话不是很懂.
   compact_pointer_[level] = largest.Encode().ToString();
+  // 我们都知道不能把 compact_pointer[level] 设置为 smallest 对吧.
   c->edit_.SetCompactPointer(level, largest);
 
   return c;
@@ -958,10 +983,12 @@ Compaction* VersionSet::CompactRange(
 
 Compaction::Compaction(int level)
     : level_(level),
+      // 我觉得 max_output_file_size_ 应该初始化 MaxFileSizeForLevel(level + 1) 吧, 毕竟输出的是
+      // level + 1 层的文件.
       max_output_file_size_(MaxFileSizeForLevel(level)),
       input_version_(NULL) {
   for (int i = 0; i < config::kNumLevels; i++) {
-    level_ptrs_[i] = 0;
+    level_ptrs_[i] = 0;  // Q: 由于不知道 level_ptrs_ 干啥的, 所以也不知道这里为啥这样.
   }
 }
 

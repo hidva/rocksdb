@@ -118,24 +118,27 @@ class VersionSet {
   // current version.  Iff Apply() returns OK, arrange to delete
   // cleanup_mem (if cleanup_mem != NULL) when it is no longer needed
   // by older versions.
+  // Q: 不懂其意.
   Status LogAndApply(VersionEdit* edit, MemTable* cleanup_mem);
 
   // Recover the last saved descriptor from persistent storage.
   Status Recover(uint64_t* log_number, SequenceNumber* last_sequence);
 
   // Save current contents to *log
+  // 参见实现了解具体写入了哪些内容.
   Status WriteSnapshot(log::Writer* log);
 
   // Return the current version.
   Version* current() const { return current_; }
 
   // Return the current manifest file number
+  // Q: 为什么 manifest_file_number_ 一直保持不变. 难道不该像 NewFileNumber() 这样么?
   uint64_t ManifestFileNumber() const { return manifest_file_number_; }
 
   // Allocate and return a new file number
   uint64_t NewFileNumber() { return next_file_number_++; }
 
-  // Return the number of Table files at the specified level.
+  // Return the number of Table files at the specified level. 基于 current version.
   int NumLevelFiles(int level) const;
 
   // Pick level and inputs for a new compaction.
@@ -205,6 +208,7 @@ class VersionSet {
       const InternalKey& end,
       std::vector<FileMetaData*>* inputs);
 
+  // *smallest = min(all of inputs.smallest); *larget = max(all of inputs.largest).
   void GetRange(const std::vector<FileMetaData*>& inputs,
                 InternalKey* smallest,
                 InternalKey* largest);
@@ -215,11 +219,13 @@ class VersionSet {
   TableCache* const table_cache_;
   const InternalKeyComparator icmp_;
 
-  // Q: 用在哪一个地方?
+  // Q: 用在哪一个地方? 按我理解, next_file_number_ 指定了下一个 table file 的 number, 而
+  // manifest_file_number 指定了下一个 manifest file 的 Number.
   uint64_t next_file_number_;
   uint64_t manifest_file_number_;
 
   // Opened lazily
+  // Q: descriptor 是指什么? manifest 么?
   WritableFile* descriptor_file_;
   log::Writer* descriptor_log_;
 
@@ -239,7 +245,7 @@ class VersionSet {
   // Per-level key at which the next compaction at that level should start.
   // Either an empty string, or a valid InternalKey.
   // Q: 为何需要这么个指针, 难道每次不是随机的么? 我好像知道了 VersionEdit->compact_pointers_ 的用处了, 就是
-  // 为了持久化这个数组啊.
+  // 为了持久化这个数组啊. 但是为啥要保存 compact pointer, 本来我以为每次 compact 都是随机选择呢.
   std::string compact_pointer_[config::kNumLevels];
 
   // No copying allowed
@@ -270,8 +276,10 @@ class Compaction {
   uint64_t MaxOutputFileSize() const { return max_output_file_size_; }
 
   // Add all inputs to this compaction as delete operations to *edit.
+  // Q: 这里为啥还需要传入个 edit, 直接使用 edit_ 不更符合语义, 毕竟 edit_ holds the edits to ...
   void AddInputDeletions(VersionEdit* edit);
 
+  // Q: 语义, 实现都没有读懂!
   // Returns true if the information we have available guarantees that
   // the compaction is producing data in "level+1" for which no data exists
   // in levels greater than "level+1".
@@ -287,16 +295,24 @@ class Compaction {
 
   explicit Compaction(int level);
 
+  // 参见相应的 getter 成员函数来了解语义.
   int level_;
   uint64_t max_output_file_size_;
   Version* input_version_;
   VersionEdit edit_;
 
+  /* Q: 按我理解, inputs_[0] 存放着 level_ 层需要 compact 的文件, inputs[1] 存放着
+   * level_ + 1 层需要 compact 的文件, 即 inputs_ 不关心需要 compact 的文件是如何选取的. 参见 impl 的说法,
+   * 针对 level0 进行 compact 会选取 level0 所有文件, 针对 level-L(L > 0) 的 compact 会只选择一个文件.
+   */
   // Each compaction reads inputs from "level_" and "level_+1"
   std::vector<FileMetaData*> inputs_[2];      // The two sets of inputs
 
   // State for implementing IsBaseLevelForKey
 
+  // Q: 这里 input_version_->levels_ 应该是 input_version_->files_
+  // 这个变量干啥用的啊?
+  //
   // level_ptrs_ holds indices into input_version_->levels_: our state
   // is that we are positioned at one of the file ranges for each
   // higher level than the ones involved in this compaction (i.e. for
