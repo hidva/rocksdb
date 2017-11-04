@@ -58,6 +58,10 @@ class Version {
 
   // Reference count management (so Versions do not disappear out from
   // under live iterators)
+  /* 按我理解, Version 依附于 VersionSet, VersionSet 负责 Version 的分配构造以及析构回收.
+   * Ref() 增加当前 Version 的引用计数避免被 VersionSet 回收.
+   * Unref() 减少对 Version 的引用计数, 同时通知 VersionSet 可能需要回收当前 Version.
+   */
   void Ref();
   void Unref();
 
@@ -151,12 +155,17 @@ class VersionSet {
   // the specified level.  Returns NULL if there is nothing in that
   // level that overlaps the specified range.  Caller should delete
   // the result.
+  // 本来我以为 PickCompaction() 会调用 CompactRange() 的, 没想到没有.
+  // 另外按照我的理解, CompactRange() 之所以没有像 PickCompaction() 那样尝试 grow the number of inputs,
+  // 是因为 CompactRange() 是指定对 [begin, end] 进行 compact. 如果进行了尝试, 可能会导致最终 compact 的区间
+  // 不是精准的 [begin, end].
   Compaction* CompactRange(
       int level,
       const InternalKey& begin,
       const InternalKey& end);
 
-  // Create an iterator that reads over the compaction inputs for "*c".
+  // Create an iterator that reads over the compaction inputs(inputs_[0], inputs_[1]) for "*c".
+  // 基本思路与 Version::AddIterators() 差不多.
   // The caller should delete the iterator when no longer needed.
   Iterator* MakeInputIterator(Compaction* c);
 
@@ -165,10 +174,18 @@ class VersionSet {
 
   // Add all files listed in any live version to *live.
   // May also mutate some internal state.
+  // 根据实现, 目前是把 VersionSet 中所有 version, 所有 file 都 add 到 *live 中. 并且貌似没有更改 internal
+  // state 啊.
   void AddLiveFiles(std::set<uint64_t>* live);
 
   // Return the approximate offset in the database of the data for
   // "key" as of version "v".
+  /* 按我理解这里是求取 key 在 v 中的大概偏移值. 但现在有一个问题, v.files_ 是 '二维' 的, 那如何求取偏移呢?
+   * 根据代码实现结合自身理解, 这里是把 v.files_ '挤压拍平' 成一维之后, 再求取偏移的. 如: v 有 2 层,
+   * v.files_[0] 存放着 [ka, kb], [kc, kd]; v.files_[1] 存放着 [ke, kf], [kg, kh]; 其中 ka < kb < ke <
+   * kf < kc < kd < kg < kh; kg < k < kh, 那么 k 在 v 中的偏移就是 filesize(ka, kb) +
+   * filesize(kc, kd) + filesize(ke, kf) + (k 在 file(kg, kh) 中的偏移).
+   */
   uint64_t ApproximateOffsetOf(Version* v, const InternalKey& key);
 
   // Register a reference to a large value with the specified
@@ -196,7 +213,7 @@ class VersionSet {
 
   Status Finalize(Version* v);
 
-  // Delete any old versions that are no longer needed.
+  // Delete any old versions that are no longer needed. 很显然此时是否 needed 是根据 ref 来判断的.
   void MaybeDeleteOldVersions();
 
   struct BySmallestKey;
@@ -301,11 +318,15 @@ class Compaction {
   Version* input_version_;
   VersionEdit edit_;
 
-  /* Q: 按我理解, inputs_[0] 存放着 level_ 层需要 compact 的文件, inputs[1] 存放着
+  /* QA: 按我理解, inputs_[0] 存放着 level_ 层需要 compact 的文件, inputs[1] 存放着
    * level_ + 1 层需要 compact 的文件, 即 inputs_ 不关心需要 compact 的文件是如何选取的. 参见 impl 的说法,
    * 针对 level0 进行 compact 会选取 level0 所有文件, 针对 level-L(L > 0) 的 compact 会只选择一个文件.
+   * A: 貌似真的是这样.
    */
   // Each compaction reads inputs from "level_" and "level_+1"
+  // 根据 GetOverlappingInputs() 的实现细节, inputs_ 是否符合 LevelFileNumIterator 中 flist 的参数说明
+  // 依赖于 input_version 各个 level 是否符合 flist 的参数说明. 目前由于 input_version 都经过了 Finalize()
+  // 的处理, 所以 input_version 各个 level 都符合 flist 的参数说明.
   std::vector<FileMetaData*> inputs_[2];      // The two sets of inputs
 
   // State for implementing IsBaseLevelForKey

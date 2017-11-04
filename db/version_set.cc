@@ -75,7 +75,7 @@ Version::~Version() {
 // EncodeFixed64.
 /*
  * LevelFileNumIterator, 在了解 LevelFileNumIterator 之前首先了解一下 flist_ 是啥, flist_ 是某一 level 下
- * 所有 table 文件的集合, 如 flist_ 可能是 version->files_[level], flist_ 中的文件按照 largest key 从小到大
+ * 若干 table 文件的集合, 如 flist_ 可能是 version->files_[level], flist_ 中的文件按照 largest key 从小到大
  * 排序. 所以 flist_ 像极了 table file 的 index block. LevelFileNumIterator 就是对 flist_ 的迭代,
  * iter->Key() 是 largest key, iter->Value() 是 file number of the file.
  */
@@ -644,6 +644,7 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
         result += files[i]->file_size;
       } else if (icmp_.Compare(files[i]->smallest, ikey) > 0) {
         // Entire file is after "ikey", so ignore
+        // Q: 可以证明, 当 level == 0 时, 这里也可以 break. 或许是此时 v level 0 并未使用 SortLevel() 排序.
         if (level > 0) {
           // Files other than level 0 are sorted by meta->smallest, so
           // no further files in this level will contain data for
@@ -658,17 +659,19 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
             ReadOptions(), files[i]->number, &tableptr);
         if (tableptr != NULL) {
           result += tableptr->ApproximateOffsetOf(ikey.Encode());
-        }
+        }  // 话说不应该有 tableptr == NULL 的情况吧.
         delete iter;
       }
     }
   }
 
+  // 明明都是 Approximate 了, 为啥还这么精细. 不过话说回来了我一开始还真没有想到还要加上 large value size.
   // Add in large value files which are references from internal keys
   // stored in the table files
   //
   // TODO(opt): this is O(# large values in db).  If this becomes too slow,
-  // we could store an auxiliary data structure indexed by internal key
+  // we could store an auxiliary data structure indexed by internal key.
+  // 所以这个 data structure 是 map<internal key, large value ref> 么?
   for (LargeValueMap::const_iterator it = large_value_refs_.begin();
        it != large_value_refs_.end();
        ++it) {
@@ -682,7 +685,6 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
       }
     }
   }
-
 
   return result;
 }
@@ -744,6 +746,7 @@ void VersionSet::MaybeDeleteOldVersions() {
   // Note: it is important to delete versions in order since a newer
   // version with zero refs may be holding a pointer to a memtable
   // that is used by somebody who has a ref on an older version.
+  // Q: 不理解为啥会有这样的局面?
   while (oldest_ != current_ && oldest_->refs_ == 0) {
     Version* next = oldest_->next_;
     delete oldest_;
@@ -752,6 +755,7 @@ void VersionSet::MaybeDeleteOldVersions() {
 }
 
 void VersionSet::AddLiveFiles(std::set<uint64_t>* live) {
+  // any live version? 我本来以为会首先 MaybeDeleteOldVersions() 一次呢
   for (Version* v = oldest_; v != NULL; v = v->next_) {
     for (int level = 0; level < config::kNumLevels; level++) {
       const std::vector<FileMetaData*>& files = v->files_[level];
@@ -815,14 +819,18 @@ void VersionSet::GetRange(const std::vector<FileMetaData*>& inputs,
 
 Iterator* VersionSet::MakeInputIterator(Compaction* c) {
   ReadOptions options;
+  // 本来按照我的理解, paranoid_checks 为 true 时意味着 verify_checksums 总是为 true.
+  // 但有的地方 paranoid_checks 的值就不影响 verify_checksums, 有的地方则是影响.
   options.verify_checksums = options_->paranoid_checks;
   options.fill_cache = false;
 
   // Level-0 files have to be merged together.  For other levels,
   // we will make a concatenating iterator per level.
   // TODO(opt): use concatenating iterator for level-0 if there is no overlap
+  // 和我想的一样, 仅当 c->level() == 0 && which == 0 时才可能会 overlap, 其他情况下绝不会 overlap, 即可以
+  // 使用 LevelFileNumIterator, NewTwoLevelIterator.
   const int space = (c->level() == 0 ? c->inputs_[0].size() + 1 : 2);
-  Iterator** list = new Iterator*[space];
+  Iterator** list = new Iterator*[space];  // 为啥不使用 vector.
   int num = 0;
   for (int which = 0; which < 2; which++) {
     if (!c->inputs_[which].empty()) {
