@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-// Q: VersionEdit, Version, VersionSet 三者交织密切, 等看完再统一总结, 确保理解每一句话.
-
 #ifndef STORAGE_LEVELDB_DB_VERSION_EDIT_H_
 #define STORAGE_LEVELDB_DB_VERSION_EDIT_H_
 
@@ -17,7 +15,9 @@ namespace leveldb {
 class VersionSet;
 
 struct FileMetaData {
+  // 严格意义上说, refs 并不是任何 file meta data, 只是用来内存管理的.
   int refs;
+
   uint64_t number;
   uint64_t file_size;         // File size in bytes
   InternalKey smallest;       // Smallest internal key served by table
@@ -26,10 +26,8 @@ struct FileMetaData {
   FileMetaData() : refs(0), file_size(0) { }
 };
 
-/*
- * Q: 按我理解, Version 相当于 manifest 文件, 而 VersionEdit 则是生成/解析 manifest 文件的工具类.
- * 注意根据文档可知, manifest 的格式与 log file 采用的格式一致.
- */
+
+// VersionEdit, 参见 version.README.md 中的记录.
 class VersionEdit {
  public:
   VersionEdit() { Clear(); }

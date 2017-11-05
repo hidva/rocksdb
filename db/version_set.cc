@@ -20,6 +20,7 @@
 
 namespace leveldb {
 
+// 为啥不用查表法, 省得每次计算了.
 static double MaxBytesForLevel(int level) {
   if (level == 0) {
     return 4 * 1048576.0;
@@ -217,12 +218,19 @@ std::string Version::DebugString() const {
   return r;
 }
 
-// Q: 不懂其意!
 // A helper class so we can efficiently apply a whole sequence
 // of edits to a particular state without creating intermediate
 // Versions that contain full copies of the intermediate state.
+/* 按我理解, 如果没有 Builder, 那么 apply a whole sequence of edits 的过程:
+ * version0 经过 apply edit 0 变成 version1 经过 apply edit 1 变成 version2 ...
+ * 在使用 Builder 之后:
+ * Builder(version0) apply edit 0, apply edit 1, ... , Builder.SaveTo(versionN);
+ * 即省了中间 Version 的创建.
+ */
 class VersionSet::Builder {
  private:
+  // <<file number, FileMetaData>>; 这里之所以不使用 std::vector<FileMetaData*> 原因参见 Apply(),
+  // 在 apply delete file 更改时, 使用 std::map 更有效率.
   typedef std::map<uint64_t, FileMetaData*> FileMap;
   VersionSet* vset_;
   FileMap files_[config::kNumLevels];
@@ -257,6 +265,11 @@ class VersionSet::Builder {
   }
 
   // Apply all of the edits in *edit to the current state.
+  // all of the edits in *edit 是指 edit 这个 VersionEdit 对象中所存放着的所有更改操作, 但根据实现可以看出
+  // 这里并没有 apply all of the edits in *edit.
+  // 这里 edit 应该是经过 normalize 之后的, 即如果原生 edit 包含了: 新增 file number 为 5, 7 的文件, 删除
+  // file number 为 5, 6 的文件; 那么 normalize 之后 edit 包含了: 新增 file number 为 7 的文件, 删除 file
+  // numberi 为 6 的文件.
   void Apply(VersionEdit* edit) {
     // Update compaction pointers
     for (int i = 0; i < edit->compact_pointers_.size(); i++) {
@@ -273,6 +286,8 @@ class VersionSet::Builder {
       const int level = iter->first;
       const uint64_t number = iter->second;
       FileMap::iterator fiter = files_[level].find(number);
+      // 既然此时 edit 中包含了对 file number 为 N 的删除操作, 那么很显然表明当前存活着的 files 中肯定有
+      // file number 为 N 的文件.
       assert(fiter != files_[level].end());  // Sanity check for debug mode
       if (fiter != files_[level].end()) {
         FileMetaData* f = fiter->second;
@@ -324,8 +339,7 @@ VersionSet::VersionSet(const std::string& dbname,
       options_(options),
       table_cache_(table_cache),
       icmp_(*cmp),
-      // Q: 这个难道不是当前存在的 Max file number + 1 么? 所以也是 Filled by Recover()?
-      next_file_number_(2),
+      next_file_number_(2),  // Filled by Recover()
       manifest_file_number_(0),  // Filled by Recover()
       descriptor_file_(NULL),
       descriptor_log_(NULL),
@@ -345,17 +359,11 @@ VersionSet::~VersionSet() {
 }
 
 Status VersionSet::LogAndApply(VersionEdit* edit, MemTable* cleanup_mem) {
+  std::string new_manifest_file;
+
   edit->SetNextFile(next_file_number_);
 
-  Version* v = new Version(this);
-  {
-    Builder builder(this, current_);
-    builder.Apply(edit);
-    builder.SaveTo(v);
-  }
-
-  std::string new_manifest_file;
-  Status s = Finalize(v);
+  // 1. 首先将更改持久化到持久性存储中.
 
   // Initialize new descriptor log file if necessary by creating
   // a temporary file that contains a snapshot of the current version.
@@ -363,7 +371,6 @@ Status VersionSet::LogAndApply(VersionEdit* edit, MemTable* cleanup_mem) {
     if (descriptor_log_ == NULL) {
       assert(descriptor_file_ == NULL);
       new_manifest_file = DescriptorFileName(dbname_, manifest_file_number_);
-      edit->SetNextFile(next_file_number_);
       s = env_->NewWritableFile(new_manifest_file, &descriptor_file_);
       if (s.ok()) {
         descriptor_log_ = new log::Writer(descriptor_file_);
@@ -387,6 +394,16 @@ Status VersionSet::LogAndApply(VersionEdit* edit, MemTable* cleanup_mem) {
   if (s.ok() && !new_manifest_file.empty()) {
     s = SetCurrentFile(env_, dbname_, manifest_file_number_);
   }
+
+  // 2. 再将更改应用到内存中.
+  Version* v = new Version(this);
+  {
+    Builder builder(this, current_);
+    builder.Apply(edit);
+    builder.SaveTo(v);
+  }
+
+  Status s = Finalize(v);
 
   // Install the new version
   if (s.ok()) {
@@ -427,6 +444,7 @@ Status VersionSet::Recover(uint64_t* log_number,
     return s;
   }
   if (current.empty() || current[current.size()-1] != '\n') {
+    // 这么严格==
     return Status::Corruption("CURRENT file does not end with newline");
   }
   current.resize(current.size() - 1);
@@ -447,6 +465,7 @@ Status VersionSet::Recover(uint64_t* log_number,
   {
     LogReporter reporter;
     reporter.status = &s;
+    // checksum 为 true 为啥不根据 option 计算出来?
     log::Reader reader(file, &reporter, true/*checksum*/);
     Slice record;
     std::string scratch;
@@ -507,7 +526,7 @@ Status VersionSet::Recover(uint64_t* log_number,
       current_->next_ = v;
       current_ = v;
       manifest_file_number_ = next_file;
-      next_file_number_ = next_file + 1;  // Q: 不加 1 也可以的吧?
+      next_file_number_ = next_file + 1;  // 不加 1 也可以的吧?
     }
   }
 
@@ -536,10 +555,20 @@ Status VersionSet::Finalize(Version* v) {
       // when producing a level-0 file; and too many level-0 files
       // increase merging costs.  So use a file-count limit for
       // level-0 in addition to the byte-count limit.
+      //
+      // 当 leveldb 检测到内存中的 memtable 在未压缩的情况下达到 1mb 时, 就会将 memtable 压缩序列化到
+      // 某个 level0 文件中, 所以此时该 level0 文件大小要比 1mb 要少. 所以说 Level-0 file sizes are going
+      // to be often much smaller than ...
+      //
+      // too many level-0 files increase merging costs. 按我理解, 根据程序局部性原理, 大多数读取操作将落在
+      // 内存中的 memtable 或者 level 0 中, 如果 level 0 文件数目过多, 那么很显然将导致这些读取操作延迟增加.
+      // 毕竟当读取操作落在 level 0 文件中时, 会不得不遍历相当多 level 0 文件来查找结果.
       double count_score = v->files_[level].size() / 4.0;
       if (count_score > score) {
         score = count_score;
       }
+      // 本来我想的是当 level 0 文件数目达到或者超过 4 之后, 就将 score 置为无穷大, 即此时首先 compact level
+      // 0. 原文实现的较为温和.
     }
 
     if (score > best_score) {
@@ -611,6 +640,7 @@ Status VersionSet::SortLevel(Version* v, uint64_t level) {
   cmp.internal_comparator = &icmp_;
   std::sort(v->files_[level].begin(), v->files_[level].end(), cmp);
 
+  // 把这段对 level 合法性检查操作放在一个 CheckLevelValid() 之类的函数是不是更为合适.
   if (result.ok() && level > 0) {
     // There should be no overlap
     for (int i = 1; i < v->files_[level].size(); i++) {
@@ -777,6 +807,8 @@ void VersionSet::GetOverlappingInputs(
    * Q: 忽然想到此时没有考虑 sequence number, 所以在 compact 时, 相同 key 之下只会保留最新的 key, 那么如果
    * 使用老的 shapshot 是不是就读取不到 key 的存在了? 若 key#2, key#1 经过 compact 之后只剩下 key#2, 那么
    * 使用 sequence=1 的 shapshot 读取的时候是不是就读取不到 key 了.
+   * 难道是从 old version 中读取? 老 snapshot 依赖着 old version, 所以 snapshot alive, old version 就
+   * alive.
    */
   Slice user_begin = begin.user_key();
   Slice user_end = end.user_key();

@@ -42,12 +42,14 @@ class VersionSet;
 class WritableFile;
 
 
-// Version 严重依赖 VersionSet, 所以想要了解 Version, 需要先了解 VersionSet.
+// Version, 参见 version.README.md
 class Version {
  public:
   // Append to *iters a sequence of iterators that will
   // yield the contents of this Version when merged together.
   // REQUIRES: This version has been saved (see VersionSet::SaveTo)
+  // 这个我觉得应该是说 this version 应该经过了 VersionSet::Finalize 处理, 因为 Finalize() 中会进行
+  // SortLevel, 并且 AddIterators 默认了 Version 各层是有序排列的了.
   /*
    * 这里 the contents of this Version 是指当前 Version 实例各个 level 级别下的 table file 集合. 即:
    *    MergingIterator iter(comparator, iters->data(), iters->size());
@@ -91,7 +93,8 @@ class Version {
 
   // Level that should be compacted next and its compaction score.
   // Score < 1 means compaction is not strictly needed.  These fields
-  // are initialized by Finalize().
+  // are initialized by Finalize(). 关于 compaction score 是如何计算的, 参见 VersionSet::Finalize(),
+  // 和我最开始想的一样: level 当前总大小 / level 允许的最大大小.
   double compaction_score_;
   int compaction_level_;
 
@@ -109,6 +112,8 @@ class Version {
   void operator=(const Version&);
 };
 
+
+// VersionSet, 参见 version.README.md.
 class VersionSet {
  public:
   VersionSet(const std::string& dbname,
@@ -122,10 +127,10 @@ class VersionSet {
   // current version.  Iff Apply() returns OK, arrange to delete
   // cleanup_mem (if cleanup_mem != NULL) when it is no longer needed
   // by older versions.
-  // Q: 不懂其意.
   Status LogAndApply(VersionEdit* edit, MemTable* cleanup_mem);
 
-  // Recover the last saved descriptor from persistent storage.
+  // Recover the last saved descriptor from persistent storage. 我怎么觉得应该在 VersionSet 的构造函数
+  // 中调用一下该函数呢? 不然如果外界忘记调用 Recover() 那么他们将使用着错误的结果吧.
   Status Recover(uint64_t* log_number, SequenceNumber* last_sequence);
 
   // Save current contents to *log
@@ -136,10 +141,13 @@ class VersionSet {
   Version* current() const { return current_; }
 
   // Return the current manifest file number
-  // Q: 为什么 manifest_file_number_ 一直保持不变. 难道不该像 NewFileNumber() 这样么?
+  // QA: 为什么 manifest_file_number_ 一直保持不变. 难道不该像 NewFileNumber() 这样么?
+  // A: 参见 manifest_file_number_ 的文档.
   uint64_t ManifestFileNumber() const { return manifest_file_number_; }
 
-  // Allocate and return a new file number
+  // Allocate and return a new file number;
+  // QA: 难道不得生成并写入个 VersionEdit 来表明变更么.
+  // A: VersionSet 会在合适的时候写入个 VersionEdit 来持久化变更信息, 参见 LogAndApply().
   uint64_t NewFileNumber() { return next_file_number_++; }
 
   // Return the number of Table files at the specified level. 基于 current version.
@@ -199,6 +207,8 @@ class VersionSet {
   // Cleanup the large value reference state by eliminating any
   // references from files that are not includes in either "live_tables"
   // or "log_file".
+  // 根据 impl 文档, 当 large value ref 不被 live tables, log file 引用时, 那么这个 large value 就可以被
+  // 安全删除掉了.
   void CleanupLargeValueRefs(const std::set<uint64_t>& live_tables,
                              uint64_t log_file_num);
 
@@ -211,6 +221,7 @@ class VersionSet {
   friend class Compaction;
   friend class Version;
 
+  // 按我理解, Finalize 有固化 v 的意思, 经过 Finalize() 之后, v 将只读.
   Status Finalize(Version* v);
 
   // Delete any old versions that are no longer needed. 很显然此时是否 needed 是根据 ref 来判断的.
@@ -236,13 +247,17 @@ class VersionSet {
   TableCache* const table_cache_;
   const InternalKeyComparator icmp_;
 
-  // Q: 用在哪一个地方? 按我理解, next_file_number_ 指定了下一个 table file 的 number, 而
-  // manifest_file_number 指定了下一个 manifest file 的 Number.
+  /* next_file_number_ 指定了下一个 table file 的 number.
+   * manifest_file_number_, 按我理解 A new MANIFEST file (with a new number embedded in the file
+   * name) is created whenever the database is reopened, 然后就会一直使用这个 manifest 文件不再会创建新的
+   * manifest 文件. manifest_file_number_ 指定了当前使用着的 manifest 文件的序号.
+   */
   uint64_t next_file_number_;
   uint64_t manifest_file_number_;
 
   // Opened lazily
-  // Q: descriptor 是指什么? manifest 么?
+  // 关于 descriptor 是什么, 参见 vesion.README.md; descriptor_file_ 就是传说中的 manifest 文件.
+  // 两者要么都为 Null, 要么都不为 Null, descriptor_file_ 是 descriptor_log_ 的底层存储.
   WritableFile* descriptor_file_;
   log::Writer* descriptor_log_;
 
@@ -254,15 +269,13 @@ class VersionSet {
   // values containing references to the value.  We keep the
   // internal key as a std::string rather than as an InternalKey because
   // we want to be able to easily use a set. 很显然如果使用 InternalKey, 需要重载 operator< 等运算符.
-  // Q: 为啥要保存这么些东西?
+  // 根据 CleanupLargeValueRefs() 可知, 这里 File number 可能是 table file, 也可能是 log file.
   typedef std::set<std::pair<uint64_t, std::string> > LargeReferencesSet;
   typedef std::map<LargeValueRef, LargeReferencesSet> LargeValueMap;
   LargeValueMap large_value_refs_;
 
   // Per-level key at which the next compaction at that level should start.
   // Either an empty string, or a valid InternalKey.
-  // Q: 为何需要这么个指针, 难道每次不是随机的么? 我好像知道了 VersionEdit->compact_pointers_ 的用处了, 就是
-  // 为了持久化这个数组啊. 但是为啥要保存 compact pointer, 本来我以为每次 compact 都是随机选择呢.
   std::string compact_pointer_[config::kNumLevels];
 
   // No copying allowed
@@ -293,7 +306,7 @@ class Compaction {
   uint64_t MaxOutputFileSize() const { return max_output_file_size_; }
 
   // Add all inputs to this compaction as delete operations to *edit.
-  // Q: 这里为啥还需要传入个 edit, 直接使用 edit_ 不更符合语义, 毕竟 edit_ holds the edits to ...
+  // 这里为啥还需要传入个 edit, 直接使用 edit_ 不更符合语义, 毕竟 edit_ holds the edits to ...
   void AddInputDeletions(VersionEdit* edit);
 
   // Q: 语义, 实现都没有读懂!
@@ -331,7 +344,7 @@ class Compaction {
 
   // State for implementing IsBaseLevelForKey
 
-  // Q: 这里 input_version_->levels_ 应该是 input_version_->files_
+  // Q: 这里 input_version_->levels_ 应该是指 input_version_->files_
   // 这个变量干啥用的啊?
   //
   // level_ptrs_ holds indices into input_version_->levels_: our state
