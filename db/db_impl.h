@@ -89,6 +89,7 @@ class DBImpl : public DB {
   // log-file/memtable and writes a new descriptor iff successful.
   Status CompactMemTable();
 
+  // log file 中的 record 是 WriteBatch 序列化后的内容.
   Status RecoverLogFile(uint64_t log_number,
                         VersionEdit* edit,
                         SequenceNumber* max_sequence);

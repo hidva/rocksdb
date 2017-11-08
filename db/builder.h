@@ -23,6 +23,10 @@ class VersionEdit;
 // large value refs and the added file information will be added to
 // *edit.  If no data is present in *iter, meta->file_size will be set
 // to zero, and no Table file will be produced.
+// 这个时候才会把 large value refs 更新到 VersionEdit 中啊. 不过确实只有这个时候才能更新, 只有这个时候才知道
+// file number 嘛.
+//
+// 当返回 status 不是 ok 时, edit 应被清空.
 extern Status BuildTable(const std::string& dbname,
                          Env* env,
                          const Options& options,

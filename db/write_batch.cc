@@ -13,6 +13,9 @@
 // varstring :=
 //    len: varint32
 //    data: uint8[len]
+//
+// 第 0 个 record 的 sequence 是 rep_ 中记录的 sequence, 第 i 个 record 的 sequence 是第 i - 1 个 record
+// 的 sequence + 1.
 
 #include "include/write_batch.h"
 
@@ -76,8 +79,8 @@ void WriteBatch::Delete(const Slice& key) {
 
 Status WriteBatchInternal::InsertInto(const WriteBatch* b,
                                       MemTable* memtable) {
-  const int count = WriteBatchInternal::Count(b);
-  int found = 0;
+  const int count = WriteBatchInternal::Count(b); // expect count
+  int found = 0;  // actual count
   Iterator it(*b);
   for (; !it.Done(); it.Next()) {
     switch (it.op()) {
@@ -121,6 +124,8 @@ WriteBatchInternal::Iterator::Iterator(const WriteBatch& batch)
 
 void WriteBatchInternal::Iterator::Next() {
   assert(!done_);
+  // QA: 为啥这里要更新 seq_????? 最新版移除了 Iterator 类, 所以也不清楚这里是不是正确? 我觉得肯定是错误度的
+  // A: 好吧我误会了, 这里确实需要自增.
   seq_++;
   GetNextEntry();
 }
@@ -140,8 +145,8 @@ void WriteBatchInternal::Iterator::GetNextEntry() {
         op_ = static_cast<ValueType>(tag);
       } else {
         status_ = Status::Corruption("bad WriteBatch Put");
-        done_ = true;
-        input_.clear();
+        done_ = true;  // 我没想到更新 done_.
+        input_.clear();  // 就放着呗? 为啥还要 clear().
       }
       break;
     case kTypeDeletion:

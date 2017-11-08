@@ -12,6 +12,16 @@
 //    batch.Delete("key");
 //    batch.Put("key", "v2");
 //    batch.Put("key", "v3");
+//
+// 本来我以为 WriteBatch 的 entry 具有相同的 sequence number, 后来发现这样是不行的, 如下:
+//
+//    batch.Put("key", "v1"); // #1
+//    batch.Delete("key");  // #2
+//
+// 如果 #1, #2 具有相同的 sequence number, 那么当该 WriteBatch 应用到 Memtable 时是没有办法区分出 #1, #2
+// 谁先谁后的!
+//
+// 所以应用 WriteBatch 之后对应 snapshot 的 sequence number 应该是 WriteBatch 中 max sequence number.
 
 #ifndef STORAGE_LEVELDB_INCLUDE_WRITE_BATCH_H_
 #define STORAGE_LEVELDB_INCLUDE_WRITE_BATCH_H_

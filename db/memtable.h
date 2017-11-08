@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The LevelDB Authors. All rights reserved.
+2// Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
@@ -19,7 +19,7 @@ class MemTableIterator;
 
 /*
  * MemTable, 本质上就是 SkipList. 其 key 是 InternalKey 的序列化形式; 其 value 是用户添加的 value, 或者
- * 为空.
+ * 为空, 或者是个 Larger Value Ref, 根据 key 中的 value type 解释而定.
  */
 class MemTable {
  public:

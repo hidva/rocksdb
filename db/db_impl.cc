@@ -363,6 +363,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number,
   while (reader.ReadRecord(&record, &scratch) &&
          status.ok()) {
     if (record.size() < 12) {
+      // 当 paranoid_checks 为 true 时, 会由于该错误而终止 recovery. 否则忽略该 error.
       reporter.Corruption(
           record.size(), Status::Corruption("log record too small"));
       continue;
@@ -400,6 +401,11 @@ Status DBImpl::RecoverLogFile(uint64_t log_number,
     status = WriteLevel0Table(mem, edit);
     // Reflect errors immediately so that conditions like full
     // file-systems cause the DB::Open() to fail.
+    /* 这里按我理解是可以不 WriteLevel0Table() 而是把 mem 作为 dbimpl->memtable 的起始值.
+     * 这里之所以 WriteLevel0Table() 可能是出于这么个场景考虑: 在上一次启动时, 由于磁盘满导致程序崩溃退出了, 然后
+     * 程序开始重启, 然后 leveldb 开始 recovery log, 然后在这里的 WriteLevel0Table() 就能检测到磁盘已满,
+     * 然后 DB::Open() 就会失败, 所以也就是 fast-fail.
+     */
   }
 
   delete mem;
@@ -411,6 +417,9 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit) {
   mutex_.AssertHeld();
   FileMetaData meta;
   meta.number = versions_->NewFileNumber();
+  /* 我觉得这里没有必要 insert, 下面也没有必要 erase.
+   * 因为这个函数是在 mutex lock 之后执行的, 所以在该函数执行期间, 外界是无法访问 pending_outputs_ 的...
+   */
   pending_outputs_.insert(meta.number);
   Iterator* iter = mem->NewIterator();
   Log(env_, options_.info_log, "Level-0 table #%llu: started",
