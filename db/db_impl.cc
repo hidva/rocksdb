@@ -1142,11 +1142,16 @@ Status DB::Delete(const WriteOptions& opt, const Slice& key) {
 
 DB::~DB() { }
 
+
+/* DB::Open() 依次执行一揽子操作, 当这些操作全都执行成功, 就表明 open 成功. 当某个操作执行失败时, 都是导致 open
+ * 出错并返回. 具体执行的操作列表参见源码.
+ */
 Status DB::Open(const Options& options, const std::string& dbname,
                 DB** dbptr) {
   *dbptr = NULL;
 
   DBImpl* impl = new DBImpl(options, dbname);
+  // 没必要 lock 吧? 毕竟这时候 impl 还没有暴露出去呢!
   impl->mutex_.Lock();
   VersionEdit edit;
   Status s = impl->Recover(&edit); // Handles create_if_missing, error_if_exists

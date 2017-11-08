@@ -70,8 +70,18 @@ class DBImpl : public DB {
 
   // Apply the specified updates and save the resulting descriptor to
   // persistent storage.  If cleanup_mem is non-NULL, arrange to
-  // delete it when all existing snapshots have gone away iff Install()
+  // delete it when all existing snapshots have gone away iff VersionSet::LogAndApply()
   // returns OK.
+  /* 此时 edit 表示一堆尚未持久化以及尚未应用到 VersionSet 中的变更. Install() 将 edit 持久化以及引用到
+   * versionset 中. 可以参考实现了解 new_log_number, cleanup_mem 的语义.
+   *
+   * 另外一个角度来看, edit 存储着 redo old log 所产生的 server state 变更记录, new log number 指定了已经打开
+   * 的 new log 的 number, Install() 会原子地完成如下事情:
+   *    1. 持久化与 apply edit -> version set;
+   *    2. 持久化与 apply new log number;
+   * 既当 Install() 成功返回时, old log 可以被安全地删除. 当 Install() 出错时, old log 需要保留, 并且总是
+   * 可以再一次 redo old log.
+   */
   Status Install(VersionEdit* edit,
                  uint64_t new_log_number,
                  MemTable* cleanup_mem);

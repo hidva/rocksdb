@@ -148,6 +148,8 @@ class VersionSet {
   // Allocate and return a new file number;
   // QA: 难道不得生成并写入个 VersionEdit 来表明变更么.
   // A: VersionSet 会在合适的时候写入个 VersionEdit 来持久化变更信息, 参见 LogAndApply().
+  // 任何调用方在实际使用返回的 file number 之前总应该调用 LogAndApply() 来持久化变更后的 next file number.
+  // 不然就会导致持久化设备中记录的仍是 old next_file_number. 可以参考 DB::Open() 打开 log 这一段代码
   uint64_t NewFileNumber() { return next_file_number_++; }
 
   // Return the number of Table files at the specified level. 基于 current version.
