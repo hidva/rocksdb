@@ -625,6 +625,11 @@ void DBImpl::BackgroundCompaction() {
   }
 }
 
+/* 按我理解, 该函数应该由 DoCompactionWork() 内部调用, 不应该外界直接调用的.
+ *
+ * 当 DoCompactionWork() 成功返回时, 该函数就只是 delete compact;
+ * 当 DoCompactionWork() 返回非 ok status 时, 该函数就依次清洗 CompactionState, 具体见实现.
+ */
 void DBImpl::CleanupCompaction(CompactionState* compact) {
   mutex_.AssertHeld();
   if (compact->builder != NULL) {
@@ -1085,6 +1090,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
 
 bool DBImpl::HasLargeValues(const WriteBatch& batch) const {
   if (WriteBatchInternal::ByteSize(&batch) >= options_.large_value_threshold) {
+  // 这个 if 判断很精彩啊.
     for (WriteBatchInternal::Iterator it(batch); !it.Done(); it.Next()) {
       if (it.op() == kTypeValue &&
           it.value().size() >= options_.large_value_threshold) {
@@ -1108,6 +1114,7 @@ void DBImpl::MaybeCompressLargeValue(
     case kLightweightCompression: {
       port::Lightweight_Compress(raw_value.data(), raw_value.size(), scratch);
       if (scratch->size() < (raw_value.size() / 8) * 7) {
+        // 大姐你这个就不能写成 (raw_value.size() * 7) / 8 么!
         *file_bytes = *scratch;
         *ref = LargeValueRef::Make(raw_value, kLightweightCompression);
         return;
@@ -1147,13 +1154,28 @@ Status DBImpl::HandleLargeValues(SequenceNumber assigned_seq,
             MaybeCompressLargeValue(
                 it.value(), &file_bytes, &scratch, &large_ref);
             InternalKey ikey(it.key(), seq, kTypeLargeValueRef);
+            // 根据 RegisterLargeValueRef() 的返回值来判断 large_ref 对应的文件是否已经存在, 本来我想的是
+            // 通过 open O_EXCL 标识来判断==
+            //
+            // 当 HandleLargeValues() 出错返回时, 已经 register 的 large ref 会在 log number 变更时被删除,
+            // 比如当 dbimpl_->mem_ > 1mb 时, 此时会变更 log number, 同时移除这些 large ref.
             if (versions_->RegisterLargeValueRef(large_ref, log_number_,ikey)) {
               // TODO(opt): avoid holding the lock here (but be careful about
               // another thread doing a Write and changing log_number_ or
               // having us get a different "assigned_seq" value).
+              /* 按我理解, 可以在 #1, #2 处添加相应代码来避免在磁盘写入期间持有锁. 本来还想着如果 avoid holding
+               * lock 会不会导致多个线程在 Put same large value 时, 导致 large value file 被反复擦写, 导致
+               * 线程可能会看到 large value file 只写入了一半这种情况? 但是原文实现是先写入到临时文件, 然后
+               * Rename() 替换, 所以若 large value file 存在, 那么其一定是完整的内容.
+               *
+               * Q: 这里释放锁有一个问题就是目前 dbimpl->last_sequence_ 未被更新, 所以其他 thread doing a
+               * Write 拿到的 last_sequence 就会有本线程重合, 这是一个问题. 但是原文的 changing log_number_
+               * or having us get a ... 没看懂==
+               */
 
               uint64_t tmp_number = versions_->NewFileNumber();
               pending_outputs_.insert(tmp_number);
+              // #1 mutex_.unlock()
               std::string tmp = TempFileName(dbname_, tmp_number);
               WritableFile* file;
               Status s = env_->NewWritableFile(tmp, &file);
@@ -1162,7 +1184,8 @@ Status DBImpl::HandleLargeValues(SequenceNumber assigned_seq,
               }
 
               file->Append(file_bytes);
-
+              // QA: 大哥这里不调用 file->Sync() 么!!!
+              // A: 最新 leveldb 已经移除了对 large value 的支持, 心好痛==.
               s = file->Close();
               delete file;
 
@@ -1174,6 +1197,7 @@ Status DBImpl::HandleLargeValues(SequenceNumber assigned_seq,
                 Log(env_, options_.info_log, "Write large value: %s",
                     s.ToString().c_str());
               }
+              // #2 mutex_.lock()
               pending_outputs_.erase(tmp_number);
 
               if (!s.ok()) {

@@ -129,6 +129,7 @@ class DBImpl : public DB {
   // return, then the client should delete *final when no longer
   // needed.  Returns OK on success, and an appropriate error
   // otherwise.
+  // 为啥这个逻辑很简单的函数能享有一大坨注释, 而其他很难理解的函数连一句话注释都轮不到.
   Status HandleLargeValues(SequenceNumber assigned_seq,
                            WriteBatch* updates,
                            WriteBatch** final);
