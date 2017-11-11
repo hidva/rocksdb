@@ -71,6 +71,7 @@ class Env {
   // Store in *result the names of the children of the specified directory.
   // The names are relative to "dir".
   // Original contents of *results are dropped.
+  // 实现需要确保当出错返回时, result 中不会存放只有一部分的文件名.
   virtual Status GetChildren(const std::string& dir,
                              std::vector<std::string>* result) = 0;
 

@@ -86,9 +86,22 @@ class Version {
   VersionSet* vset_;            // VersionSet to which this Version belongs
   Version* next_;               // Next version in linked list
   int refs_;                    // Number of live refs to this version
+  // 按我理解 cleanup mem 存放着 Version level0 文件的部分内容, 当 leveldb 其他地方需要使用 Version 查找数据
+  // 时都会首先从 cleanupmem 中查找, 如果找不到再会去文件中查找.
   MemTable* cleanup_mem_;       // NULL, or table to delete when version dropped
 
   // List of files per level
+  /* leveldb 中与 files_ 相关的几条定理:
+   * 1. 如果在 L 层存在 (ukey, seq), 那么在任意 l 层, l < L, 找不到 (ukey, seq0), seq0 < seq.
+   * 2. 如果 ukey 在每一层都存在, 且对应 seq 分别是: seq1, seq2, ..., seqMAXLEVEL; 那么 seq1 > seq2 >
+   *    ... > seqMAXLEVEL.
+   *
+   * 定理 1 的证明: 假设存在 (ukey, seq0), 那么在 (ukey, seq) 经过一次次 compact 从 level0 下降到 L 层的过程
+   * 中, 其势必会读取到 (ukey, seq0), 并且也会把 (ukey, seq0) 也带到 L 层中, 所以不存在这样的 (ukey, seq0).
+   * 好吧这并不是一个很严谨的证明==
+   *
+   * 定理 2 的证明: 根据定理 1 可以证明不存在 level N, M, N < M, 并且 seqN < seqM.
+   */
   std::vector<FileMetaData*> files_[config::kNumLevels];
 
   // Level that should be compacted next and its compaction score.
@@ -272,6 +285,9 @@ class VersionSet {
   // internal key as a std::string rather than as an InternalKey because
   // we want to be able to easily use a set. 很显然如果使用 InternalKey, 需要重载 operator< 等运算符.
   // 根据 CleanupLargeValueRefs() 可知, 这里 File number 可能是 table file, 也可能是 log file.
+  //
+  // 之前纳闷为啥要把 larger value ref 也作为 descriptor 的一部分, 后来在 DeleteObsoleteFiles() 中发现, 如果
+  // 不这么做如何很效率地确定 large value file 是否可以被删除呢?
   typedef std::set<std::pair<uint64_t, std::string> > LargeReferencesSet;
   typedef std::map<LargeValueRef, LargeReferencesSet> LargeValueMap;
   LargeValueMap large_value_refs_;
@@ -311,10 +327,14 @@ class Compaction {
   // 这里为啥还需要传入个 edit, 直接使用 edit_ 不更符合语义, 毕竟 edit_ holds the edits to ...
   void AddInputDeletions(VersionEdit* edit);
 
-  // Q: 语义, 实现都没有读懂!
+  // QA: 语义, 实现都没有读懂!
+  // A: 已然了然于心.
   // Returns true if the information we have available guarantees that
   // the compaction is producing data in "level+1" for which no data exists
   // in levels greater than "level+1".
+  /* 当返回 true 时, 表明在任何 level( > L + 1) 层不再存在 user_key. 若返回 false, 则表明**可能**存在.
+   * 关于 IsBaseLevelForKey 的使用场景, 参考 DoCompactionWork().
+   */
   bool IsBaseLevelForKey(const Slice& user_key);
 
   // Release the input version for the compaction, once the compaction
@@ -346,9 +366,15 @@ class Compaction {
 
   // State for implementing IsBaseLevelForKey
 
-  // Q: 这里 input_version_->levels_ 应该是指 input_version_->files_
+  // QA: 这里 input_version_->levels_ 应该是指 input_version_->files_
   // 这个变量干啥用的啊?
-  //
+  // A: 指定了在 IsBaseLevelForKey(ukey) 中, 在各个 level(level >= level_ + 2)上搜索 ukey 是否可能存在时
+  // 的搜索起点, 即搜索将从下标 level_ptrs_[level] 开始, 而不总是从 0 开始. 之所以存在该变量的原因是因为外界
+  // (目测就 DoCompactionWork() 一个调用者)总是按照 ukey 从小到大的顺序调用 IsBaseLevelForKey():
+  // IsBaseLevelForKey(ukey1), IsBaseLevelForKey(ukey2), ... 此时 ukey1 < ukey2. 所以如果我们在
+  // IsBaseLevelForKey(ukey1) 时发现 input_version_->files_[level][idx].largest < ukey1, 那么在
+  // IsBaseLevelForKey(ukey2) 时, 我们总是可以跳过 idx, 而从 input_version_->files_[level][idx + 1]
+  // 开始搜索起. 所以 level_ptrs_ 就保存着这么个信息, 每次调用 IsBaseLevelForKey() 都会更新 level_ptrs_.
   // level_ptrs_ holds indices into input_version_->levels_: our state
   // is that we are positioned at one of the file ranges for each
   // higher level than the ones involved in this compaction (i.e. for

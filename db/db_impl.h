@@ -21,6 +21,7 @@ class Version;
 class VersionEdit;
 class VersionSet;
 
+// 建议看 db 主要操作时如: 打开, 写等, 列出主要的执行流程, 并考虑各种异常情况下的可恢复性.
 class DBImpl : public DB {
  public:
   DBImpl(const Options& options, const std::string& dbname);
@@ -61,17 +62,21 @@ class DBImpl : public DB {
   Iterator* NewInternalIterator(const ReadOptions&,
                                 SequenceNumber* latest_snapshot);
 
+  // 会创建并初始化 dbname 指定的数据库, dbname 原数据会全部丢失.
   Status NewDB();
 
   // Recover the descriptor from persistent storage.  May do a significant
   // amount of work to recover recently logged updates.  Any changes to
   // be made to the descriptor are added to *edit.
+  // recover recently logged updates 所产生的 Any changes to be made to the descriptor are added to
+  // *edit.
   Status Recover(VersionEdit* edit);
 
   // Apply the specified updates and save the resulting descriptor to
   // persistent storage.  If cleanup_mem is non-NULL, arrange to
   // delete it when all existing snapshots have gone away iff VersionSet::LogAndApply()
   // returns OK.
+  // Q: delete it when all existing snapshots have gone away. 啥意思?
   /* 此时 edit 表示一堆尚未持久化以及尚未应用到 VersionSet 中的变更. Install() 将 edit 持久化以及引用到
    * versionset 中. 可以参考实现了解 new_log_number, cleanup_mem 的语义.
    *
@@ -89,6 +94,7 @@ class DBImpl : public DB {
   void MaybeIgnoreError(Status* s) const;
 
   // Delete any unneeded files and stale in-memory entries.
+  // 这里 stale in-memory entries 是指 table cache 中已经被持久化设备删除但是仍然存在于 table cache 中的项.
   void DeleteObsoleteFiles();
 
   // Called when an iterator over a particular version of the
@@ -97,13 +103,17 @@ class DBImpl : public DB {
 
   // Compact the in-memory write buffer to disk.  Switches to a new
   // log-file/memtable and writes a new descriptor iff successful.
+  // 严格地说, 这里并没有 write a new descriptor; 而是更新一个已经存在的 descriptor.
+  // CompactMemTable() 具体的操作流程可以参见实现.
   Status CompactMemTable();
 
   // log file 中的 record 是 WriteBatch 序列化后的内容.
+  // max_sequence 是指 recover log file 的过程中遇到的最大的 sequence number.
   Status RecoverLogFile(uint64_t log_number,
                         VersionEdit* edit,
                         SequenceNumber* max_sequence);
 
+  // 将 mem 写入 disk 中, 同时将对 server state 的更新记录在 edit 中.
   Status WriteLevel0Table(MemTable* mem, VersionEdit* edit);
 
   bool HasLargeValues(const WriteBatch& batch) const;
@@ -135,6 +145,7 @@ class DBImpl : public DB {
   void MaybeScheduleCompaction();
   static void BGWork(void* db);
   void BackgroundCall();
+  // 执行 compact 操作, background 表明 compact 是后台运行着的.
   void BackgroundCompaction();
   void CleanupCompaction(CompactionState* compact);
   Status DoCompactionWork(CompactionState* compact);
@@ -164,27 +175,29 @@ class DBImpl : public DB {
   // 本来我觉得这里的 last_sequence_ 是用来作为 sst table file name 的数字后缀呢, 后来发现不太可能是==
   SequenceNumber last_sequence_;
   MemTable* mem_;
+  // log_ 与 mem_ 对应, 任何一个 write batch 在应用到 mem 之前都会写入 log 中.
   WritableFile* logfile_;
   log::Writer* log_;
-  // Q: log_number 干什么吃的?
+  // QA: log_number 干什么吃的?
+  // A: log file 对应的 log number.
   uint64_t log_number_;
   SnapshotList snapshots_;
 
   // Set of table files to protect from deletion because they are
-  // part of ongoing compactions.
-  /*
-   * Q: 按我理解 pendingoutput 存放的都是文件描述符, 这样可以文件被外界删除时文件的内容不会真正的删除.
-   * 但是为啥要加这么一层保护? 如果真有人在删除就让他删除好了啊? 另外为啥要用 std::set 而不是 std::vector.
-   */
+  // part of ongoing compactions. 其中存放的是 file number, 我本来以为是 file fd 呢==
   std::set<uint64_t> pending_outputs_;
 
   /*
-   * Q: 按我理解 leveldb 在 schedule bg compaction 之后将 bg_compaction_scheduled_ 置为 True.
+   * 按我理解 leveldb 在 schedule bg compaction 之后将 bg_compaction_scheduled_ 置为 True.
    * bg compaction 的实现可能如下:
    *    func bg_compaction() {
+   *        mutex_.lock()
    *        compacting_ = True;
-   *        do_compaction();
+   *        mutex_.unlock()
+   *        do_compaction(); // 这个期间可能不会持有着锁.
+   *        mutex_.lock()
    *        compacting_ = False;
+   *        mutex_.unlock()
    *        bg_compaction_scheduled_ = False;
    *    }
    */
@@ -192,6 +205,14 @@ class DBImpl : public DB {
   bool bg_compaction_scheduled_;
 
   // Is there a compaction running?
+  /* 按我理解存在 bg_compaction_scheduled_ 为 false, 同时 compacting_ 为 true 的情况, 也即 compact 可能会
+   * 被自发地运行. 但是结合了对 DBImpl::~DBImpl 的注释理解之后, 我觉得 compacting_ 的更新总是按照如下的流程:
+   *    bg_compaction_scheduled_ = true;
+   *    compacting_ = true;
+   *    compacting_ = false;
+   *    bg_compaction_scheduled_ = false;
+   * 目测这个变量就是为了测试引入的, 因为我 grep 了一下正统代码里面没有使用过 compacting_.
+   */
   bool compacting_;
 
   VersionSet* versions_;

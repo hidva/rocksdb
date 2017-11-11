@@ -113,7 +113,9 @@ bool ParseFileName(const std::string& fname,
     *number = num;
   } else {
     // Avoid strtoull() to keep filename format independent of the
-    // current locale
+    // current locale.
+    // 所以说 strtoull 可能会根据所处 locale 不同使用不同的数字字母了? 也就是 strtoull() 不总是把数字字母视为
+    // 0, 1, 2 ...
     uint64_t num;
     if (!ConsumeDecimalNumber(&rest, &num)) {
       return false;

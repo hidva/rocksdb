@@ -50,7 +50,7 @@ Status Writer::AddRecord(const Slice& slice) {
     // 这个与 doc/log_format.txt 里面讲的可不一样啊, 如果按照 doc/log_format.txt 的说法这里应该是:
     //  const int avail = kBlockSize - block_offset_;
     // 不过虽然有一点差异, 但仍然是兼容的, 所以不影响 log reader.
-    // Q: 哪为啥要 leave kHeaderSize 呢?
+    // 哪为啥要 leave kHeaderSize 呢?
     const int avail = kBlockSize - block_offset_ - kHeaderSize;
     assert(avail > 0);
 
@@ -73,8 +73,10 @@ Status Writer::AddRecord(const Slice& slice) {
     s = EmitPhysicalRecord(type, ptr, fragment_length);
     ptr += fragment_length;
     left -= fragment_length;
-    // Q: EmitPhysicalRecord() 失败会导致 AddRecord() 提前返回, 那么后续还会调用 AddRecord() 么? 如果
+    // QA: EmitPhysicalRecord() 失败会导致 AddRecord() 提前返回, 那么后续还会调用 AddRecord() 么? 如果
     // 继续调用, 那么后续 AddRecord() 可能就被污染了哇!
+    // A: 当 EmitPhysicalRecord() 出错时, 无论是在后台执行 compact 的线程中发生的, 还是在当前 write 线程中发生
+    // 的, 都会使 leveldb 进入只读状态. 并且在 leveldb 重启时, 会出错, 无法重启.
   } while (s.ok() && left > 0);
   return s;
 }

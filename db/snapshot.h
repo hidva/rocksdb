@@ -7,7 +7,8 @@
 
 #include "include/db.h"
 
-// Q: 并不清楚 snapshot 是如何实现的?!
+// QA: 并不清楚 snapshot 是如何实现的?!
+// A: 大概了解了, 但是一言难尽啊.
 
 namespace leveldb {
 

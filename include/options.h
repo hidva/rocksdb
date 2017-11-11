@@ -53,6 +53,7 @@ struct Options {
   // corruption of one DB entry may cause a large number of entries to
   // become unreadable or for the entire DB to become unopenable.
   // Default: false
+  // 为 false 时, leveldb 基本上会忽略所有的错误.
   bool paranoid_checks;
 
   // Use the specified object to interact with the environment,

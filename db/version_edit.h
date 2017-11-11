@@ -98,6 +98,9 @@ class VersionEdit {
   typedef std::set< std::pair<int, uint64_t> > DeletedFileSet;
 
   std::string comparator_;
+  // log_number_ 是指当前正在使用着的 log file 的 file number, 在打开一个已经存在的 db 时, 会打开
+  // log_number_ 指定的 log file 来 redo log. 由于不存在 file number 为 0 的 log file, 所以当
+  // log_number_ 为 0 时表明没有对应的日志文件.
   uint64_t log_number_;
   uint64_t next_file_number_;
   SequenceNumber last_sequence_;

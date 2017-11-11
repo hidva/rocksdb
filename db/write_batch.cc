@@ -16,6 +16,7 @@
 //
 // 第 0 个 record 的 sequence 是 rep_ 中记录的 sequence, 第 i 个 record 的 sequence 是第 i - 1 个 record
 // 的 sequence + 1.
+// 在 leveldb 中永远找不到两个 internal key, 它们具有相同的 sequence.
 
 #include "include/write_batch.h"
 
@@ -69,6 +70,7 @@ void WriteBatchInternal::PutLargeValueRef(WriteBatch* b,
   PutLengthPrefixedSlice(&b->rep_, key);
   PutLengthPrefixedSlice(&b->rep_,
                          Slice(large_ref.data, sizeof(large_ref.data)));
+                         // 谁要是把 large_ref.data 调整为 char* 就等着背锅吧.
 }
 
 void WriteBatch::Delete(const Slice& key) {

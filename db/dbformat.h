@@ -37,9 +37,10 @@ static const ValueType kValueTypeForSeek = kTypeLargeValueRef;
 // order 来理解当使用 kTypeDeletion, kTypeValue 作为 kValueTypeForSeek 时会导致哪些 bug, 从而只能使用
 // kTypeLargeValueRef 作为 kValueTypeForSeek.
 //
-// Q: 按我理解 ValueType 是 value 的 metainfo, 为啥要把 ValueType 编码到 InternalKey 中?
+// 按我理解 ValueType 是 value 的 metainfo, 为啥要把 ValueType 编码到 InternalKey 中?
 
-// Q: 为啥需要 SequenceNumber, 按我理解是为了实现 mvcc.
+// QA: 为啥需要 SequenceNumber, 按我理解是为了实现 mvcc.
+// A: 差不多吧
 typedef uint64_t SequenceNumber;
 
 // We leave eight bits empty at the bottom so a type and sequence#

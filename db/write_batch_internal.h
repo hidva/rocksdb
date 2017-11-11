@@ -11,6 +11,7 @@ namespace leveldb {
 
 // WriteBatchInternal provides static methods for manipulating a
 // WriteBatch that we don't want in the public WriteBatch interface.
+// 真是强迫症啊, 作为 WriteBatch 的 private 方法有何不可?
 class WriteBatchInternal {
  public:
   static void PutLargeValueRef(WriteBatch* batch,

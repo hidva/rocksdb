@@ -674,7 +674,7 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
         result += files[i]->file_size;
       } else if (icmp_.Compare(files[i]->smallest, ikey) > 0) {
         // Entire file is after "ikey", so ignore
-        // Q: 可以证明, 当 level == 0 时, 这里也可以 break. 或许是此时 v level 0 并未使用 SortLevel() 排序.
+        // 可以证明, 当 level == 0 时, 这里也可以 break. 不过或许是此时 v level 0 并未使用 SortLevel() 排序.
         if (level > 0) {
           // Files other than level 0 are sorted by meta->smallest, so
           // no further files in this level will contain data for
@@ -804,11 +804,12 @@ void VersionSet::GetOverlappingInputs(
     std::vector<FileMetaData*>* inputs) {
   inputs->clear();
   /*
-   * Q: 忽然想到此时没有考虑 sequence number, 所以在 compact 时, 相同 key 之下只会保留最新的 key, 那么如果
+   * QA: 忽然想到此时没有考虑 sequence number, 所以在 compact 时, 相同 key 之下只会保留最新的 key, 那么如果
    * 使用老的 shapshot 是不是就读取不到 key 的存在了? 若 key#2, key#1 经过 compact 之后只剩下 key#2, 那么
    * 使用 sequence=1 的 shapshot 读取的时候是不是就读取不到 key 了.
    * 难道是从 old version 中读取? 老 snapshot 依赖着 old version, 所以 snapshot alive, old version 就
    * alive.
+   * A: 参见 DoCompactionWork 中的 smallest_snapshot.
    */
   Slice user_begin = begin.user_key();
   Slice user_end = end.user_key();
@@ -984,7 +985,10 @@ Compaction* VersionSet::PickCompaction() {
   // Update the place where we will do the next compaction for this level.
   // We update this immediately instead of waiting for the VersionEdit
   // to be applied so that if the compaction fails, we will try a different
-  // key range next time. Q: 由于对 compaction 的整体流程不理解, 所以这句话不是很懂.
+  // key range next time. QA: 由于对 compaction 的整体流程不理解, 所以这句话不是很懂.
+  // A: 如果 c 标识着的 compaction 失败, 那么 c->edit_ 中的内容会被废弃, 相当于持久化设备中的 compact pointer
+  // 保持不变. 但是内存中的 compact_pointer_ 已经更新了, 所以如果程序未重启的话, 下一次的 compact 将会
+  // try a different key range.
   compact_pointer_[level] = largest.Encode().ToString();
   // 我们都知道不能把 compact_pointer[level] 设置为 smallest 对吧.
   c->edit_.SetCompactPointer(level, largest);
@@ -1028,7 +1032,8 @@ Compaction::Compaction(int level)
       max_output_file_size_(MaxFileSizeForLevel(level)),
       input_version_(NULL) {
   for (int i = 0; i < config::kNumLevels; i++) {
-    level_ptrs_[i] = 0;  // Q: 由于不知道 level_ptrs_ 干啥的, 所以也不知道这里为啥这样.
+    level_ptrs_[i] = 0;  // QA: 由于不知道 level_ptrs_ 干啥的, 所以也不知道这里为啥这样.
+    // A: 现在我终于知道了哈哈
   }
 }
 
@@ -1057,13 +1062,23 @@ bool Compaction::IsBaseLevelForKey(const Slice& user_key) {
         // We've advanced far enough
         if (user_cmp->Compare(user_key, f->smallest.user_key()) >= 0) {
           // Key falls in this file's range, so definitely not base level
+          // 本来按照我的想法, 此时会进一步执行如下代码:
+          //    iter = TableCache::NewIterator(ReadOptions(), f->number);
+          //    iter->Seek(user_key);  // 实际上这里不能使用 user_key, 这里 Seek 只接受 InternalKey.
+          // 来判断 f 中是否真的存在 user_key, 但是原文很显然并没有这么做.
           return false;
-        }
+        } /* else {
+            user_key < f->smallest.user_key(); 此时不需要继续往下遍历了, 而且也不需要更新 level_ptrs_[lvl].
+            所以 break.
+        } */
         break;
-      }
+      } /* else {
+        f->largest < user_key, 所以应该更新 level_ptrs_[lvl] 的值, 就像下面一样.
+      }*/
       level_ptrs_[lvl]++;
     }
   }
+  // 这时候我们可以确认 user_key 不再高层存在, 而且我们还更新 level_ptrs_.
   return true;
 }
 

@@ -2,7 +2,7 @@
 Version 这块刚接触的时候很是迷糊. 所以这里先在高层面上按照个人理解总结一下 Version 及其相关设施的语义, 方便在看代码时心里有个底.
 
 
-descriptor, 按我理解, descriptor 就是 server state, 存放着一个 leveldb 数据库的元信息, 如: 使用的 comparator 的 name, 下一个 table file 的 number 等. 完整的元信息项可以参考 VersionEdit 类的定义. 让我万万没有想到的是 `large_refs_added_` 与 `compact_pointers_` 竟然也保存了, 图啥啊==.
+descriptor, 按我理解, descriptor 就是 server state, 存放着一个 leveldb 数据库的元信息, 如: 使用的 comparator 的 name, 下一个 table file 的 number 等. 完整的元信息项可以参考 VersionEdit 类的定义. descriptor 所有信息总是保存在内存中, 不过对 descriptor 的修改操作总会先持久化. 在打开一个 leveldb 时, 总会创建一个新 manifest 文件来存放最新的 descriptor.
 
 descriptor 在内存中分散在多个地方存放, 如: Version 仅负责存放各个 level 的 file meta 信息, VersionSet 负责存储 next file number, compact pointers 等信息.
 

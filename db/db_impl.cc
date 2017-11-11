@@ -42,9 +42,11 @@ struct DBImpl::CompactionState {
   // will never have to service a snapshot below smallest_snapshot.
   // Therefore if we have seen a sequence number S <= smallest_snapshot,
   // we can drop all entries for the same key with sequence numbers < S.
+  // 这里一开始不理解为啥是 S <= smallest_snapshot, 我以为的是 S >= smallest_snapshot, 本来还以为 typo.
+  // 具体参见 DoCompactionWork() 中解释.
   SequenceNumber smallest_snapshot;
 
-  // Files produced by compaction
+  // Files produced by compaction, 为啥不用 FileMetaData?
   struct Output {
     uint64_t number;
     uint64_t file_size;
@@ -53,12 +55,14 @@ struct DBImpl::CompactionState {
   std::vector<Output> outputs;
 
   // State kept for output being generated
+  // outfile 表示着 compaction 生成的 sst 文件. builder 将内容写入到 outfile 中.
   WritableFile* outfile;
   TableBuilder* builder;
 
+  // 我觉得这里是指本次 compact 输出的总字节数.
   uint64_t total_bytes;
 
-  Output* current_output() { return &outputs[outputs.size()-1]; }
+  Output* current_output() { return &outputs[outputs.size()-1]; }  // 不知道 back() 么?
 
   explicit CompactionState(Compaction* c)
       : compaction(c),
@@ -84,6 +88,7 @@ static void ClipToRange(T* ptr, V minvalue, V maxvalue) {
   if (*ptr > maxvalue) *ptr = maxvalue;
   if (*ptr < minvalue) *ptr = minvalue;
 }
+// 注意这里的实现细节.
 Options SanitizeOptions(const std::string& dbname,
                         const InternalKeyComparator* icmp,
                         const Options& src) {
@@ -134,10 +139,28 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
                              &internal_comparator_);
 }
 
+/* 我之前一直在想会不会出现这种一种场景, 即某个线程 A 在使用着 dbimpl 执行一些操作, 然后另外一个线程 B 在执行
+ * delete dbimpl, 导致 A 会出现 SIGSEGV? 现在我觉得只要用户保证在 delete dbimpl 时, 没有用户代码在其他线程
+ * 使用着 dbimpl, 就不会出问题. leveldb 内部可能会在其他线程使用 dbimpl 的只有一种情况: BGWork(). 所以
+ * 如下实现中当 bg_compaction_scheduled_ 为 true 时, 表明 BGWork() 在某个线程上运行着, 此时不能
+ * delete dbimpl, 即需要等待直至 BGWork() 返回; 如果 bg_compaction_scheduled_ 为 false, 此时 leveldb 能
+ * 保证自身没有在其他线程使用着 dbimpl, 此时只要用户也能保证没在其他线程使用着 dbimpl, 就可以确保 dbimpl 能被安全
+ * delete.
+ */
 DBImpl::~DBImpl() {
   // Wait for background work to finish
   mutex_.Lock();
+  // 这是唯一一处修改 shutting_down_ 的情况.
+  // shutdown 或许没有必要用 release acquire 的语义, 另外我觉得析构函数阻塞不是很友好.
+  // 这里由于 mutex lock 的存在, shutdown 还有必要用原子操作么? 参见 DoCompactionWork(), 会在不持有锁的情况下
+  // 读取 shutting_down_.
   shutting_down_.Release_Store(this);  // Any non-NULL value is ok
+
+  /* 参见 MaybeScheduleCompaction(), leveldb 会原子地更新 bg_compaction_scheduled_, 以及调用
+   * env_->Schedule(&DBImpl::BGWork, this). 因此当这样 bg_compaction_scheduled_ 为 true 时, 表明
+   * BGWork() 已经被调度了, 此时等待其完成返回. 当 bg_compaction_scheduled_ 为 false 时, 表明当前没有
+   * BGWork() 被调度, 而且由于这里同时更新了 shut down, 所以也不会再有 BGWork() 被调度, 所以这里可以直接返回.
+   */
   if (bg_compaction_scheduled_) {
     while (bg_compaction_scheduled_) {
       bg_cv_.Wait();
@@ -164,6 +187,13 @@ Status DBImpl::NewDB() {
   assert(log_number_ == 0);
   assert(last_sequence_ == 0);
 
+  /* descriptor 的初始内容.
+   *
+   * 参见 DB::Open(), VersionSet::LogAndApply() 可知, 再一次打开一个存在的 db 会创建一个新的 manifest 文件,
+   * 该 manifest 文件的 file number 就是已经存在的 manifest 文件中保存的 next file number. 所以这里新建
+   * manifest 的 file number 1, 其内保存的 next file number 为 2, 再一次打开该 db 会创建个 file number 为
+   * 2 的 manifest, ...
+   */
   VersionEdit new_db;
   new_db.SetComparatorName(user_comparator()->Name());
   new_db.SetLogNumber(log_number_);
@@ -189,6 +219,7 @@ Status DBImpl::NewDB() {
   if (s.ok()) {
     // Make "CURRENT" file that points to the new manifest file.
     s = SetCurrentFile(env_, dbname_, 1);
+    // SetCurrentFile 失败的话也应该 DeleteFile 的吧.
   } else {
     env_->DeleteFile(manifest);
   }
@@ -198,6 +229,8 @@ Status DBImpl::NewDB() {
 Status DBImpl::Install(VersionEdit* edit,
                        uint64_t new_log_number,
                        MemTable* cleanup_mem) {
+  // QA: 这里为啥不直接使用 log_number_? 还要有参数传递?
+  // A: 参见 Install() 的语义以及其使用场景.
   mutex_.AssertHeld();
   edit->SetLogNumber(new_log_number);
   edit->SetLastSequence(last_sequence_);
@@ -235,12 +268,13 @@ void DBImpl::DeleteObsoleteFiles() {
         case kDescriptorFile:
           // Keep my manifest file, and any newer incarnations'
           // (in case there is a race that allows other incarnations)
+          // 目测应该不存在 number > versions_->ManifestFileNumber() 的情况吧.
           keep = (number >= versions_->ManifestFileNumber());
           break;
         case kTableFile:
           keep = (live.find(number) != live.end());
           break;
-        case kTempFile:
+        case kTempFile:  // 目前 leveldb 中没用过 dbtmp 文件.
           // Any temp files that are currently being written to must
           // be recorded in pending_outputs_, which is inserted into "live"
           keep = (live.find(number) != live.end());
@@ -250,7 +284,7 @@ void DBImpl::DeleteObsoleteFiles() {
           break;
         case kCurrentFile:
         case kDBLockFile:
-        case kInfoLogFile:
+        case kInfoLogFile:  // 所以 old info log 不能被及时的删除咯.
           keep = true;
           break;
       }
@@ -274,6 +308,7 @@ Status DBImpl::Recover(VersionEdit* edit) {
   // Ignore error from CreateDir since the creation of the DB is
   // committed only when the descriptor is created, and this directory
   // may already exist from a previous failed creation attempt.
+  // Q: committed only when 啥意思?
   env_->CreateDir(dbname_);
   assert(db_lock_ == NULL);
   Status s = env_->LockFile(LockFileName(dbname_), &db_lock_);
@@ -351,6 +386,8 @@ Status DBImpl::RecoverLogFile(uint64_t log_number,
   // paranoid_checks==false so that corruptions cause entire commits
   // to be skipped instead of propagating bad information (like overly
   // large sequence numbers).
+  // checksum 有必要为 true 么? 先不说 table file 的内容被误修改的概率是多低, 在之前 paranoid checks 为
+  // false 时那么宽松的政策之下还在乎这点错误的数据填充么?
   log::Reader reader(file, &reporter, true/*checksum*/);
   Log(env_, options_.info_log, "Recovering log #%llu",
       (unsigned long long) log_number);
@@ -462,6 +499,8 @@ Status DBImpl::CompactMemTable() {
     logfile_ = lfile;
     log_ = new log::Writer(lfile);
     log_number_ = new_log_number;
+    // 我觉得 DeleteObsoleteFiles() 这么重的操作不必要放在 CompactMemTable() 中, 放到一个后台线程慢慢跑就行了
+    // 么
     DeleteObsoleteFiles();
     MaybeScheduleCompaction();
   } else {
@@ -503,7 +542,7 @@ void DBImpl::MaybeScheduleCompaction() {
   mutex_.AssertHeld();
   if (bg_compaction_scheduled_) {
     // Already scheduled
-  } else if (compacting_) {
+  } else if (compacting_) {  // 参见 compacting_ 的注释, 我觉得这里没有必要判断 compacting.
     // Some other thread is running a compaction.  Do not conflict with it.
   } else if (shutting_down_.Acquire_Load()) {
     // DB is being deleted; no more background compactions
@@ -523,6 +562,11 @@ void DBImpl::BackgroundCall() {
   MutexLock l(&mutex_);
   assert(bg_compaction_scheduled_);
   if (!shutting_down_.Acquire_Load() &&
+      /* 由于此时 bg_compaction_scheduled_ 为 true, 所以 compacting_ 一定为 false. 按我理解如果
+       * compacting_ 为 true, 表明 BGWork() 已经在某个线程上运行着了, 所以触发本次 BackgroundCall()
+       * 的 MaybeScheduleCompaction() 不应该执行 env->Schedule() 的, 即本次 BackgroundCall() 不应该运行,
+       * 所以既然此时 BackgroundCall() 已经在运行了, 所以表明 compacting_ 为 false.
+       */
       !compacting_) {
     BackgroundCompaction();
   }
@@ -534,6 +578,11 @@ void DBImpl::BackgroundCall() {
   MaybeScheduleCompaction();
 }
 
+/* BackgroundCompaction() 大致分为三个阶段:
+ * 1. 将 compact 需要的数据复制到 c 中; 按我理解这里复制是为了避免在执行 compact 操作时仍然持有锁.
+ * 2. 执行 compact 操作;
+ * 3. 执行一些收尾操作.
+ */
 void DBImpl::BackgroundCompaction() {
   mutex_.AssertHeld();
   Compaction* c = versions_->PickCompaction();
@@ -544,7 +593,7 @@ void DBImpl::BackgroundCompaction() {
 
   Status status;
   if (c->num_input_files(0) == 1 && c->num_input_files(1) == 0) {
-    // Move file to next level
+    // Move file to next level. 真机智.
     FileMetaData* f = c->input(0, 0);
     c->edit()->DeleteFile(c->level(), f->number);
     c->edit()->AddFile(c->level() + 1, f->number, f->file_size,
@@ -565,7 +614,8 @@ void DBImpl::BackgroundCompaction() {
   if (status.ok()) {
     // Done
   } else if (shutting_down_.Acquire_Load()) {
-    // Ignore compaction errors found during shutting down
+    // Ignore compaction errors found during shutting down.
+    // 按我理解, 这里没有必要吧? 我觉得总是应该输出一条 log, 同时更新 bg_error_.
   } else {
     Log(env_, options_.info_log,
         "Compaction error: %s", status.ToString().c_str());
@@ -600,6 +650,8 @@ Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
     mutex_.Lock();
     file_number = versions_->NewFileNumber();
     pending_outputs_.insert(file_number);
+
+    // 下面这些不应该放在 lock 内部.
     CompactionState::Output out;
     out.number = file_number;
     out.smallest.Clear();
@@ -617,6 +669,7 @@ Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
   return s;
 }
 
+// FinishCompactionOutputFile 依次更新 compact 每一个域, 可以参考 CompactionState 的定义一起看一下.
 Status DBImpl::FinishCompactionOutputFile(CompactionState* compact,
                                           Iterator* input) {
   assert(compact != NULL);
@@ -651,7 +704,8 @@ Status DBImpl::FinishCompactionOutputFile(CompactionState* compact,
   compact->outfile = NULL;
 
   if (s.ok() && current_entries > 0) {
-    // Verify that the table is usable
+    // Verify that the table is usable.
+    // 首先我觉得这里没必要 check 的, 另外把 fill_cache 设置为 false 是不是好点?
     Iterator* iter = table_cache_->NewIterator(ReadOptions(),output_number);
     s = iter->status();
     delete iter;
@@ -694,6 +748,7 @@ Status DBImpl::InstallCompactionResults(CompactionState* compact) {
     DeleteObsoleteFiles();
   } else {
     // Discard any files we may have created during this failed compaction
+    // 之前已经把 compact->outputs CLEAR 了啊!
     for (int i = 0; i < compact->outputs.size(); i++) {
       env_->DeleteFile(TableFileName(dbname_, compact->outputs[i].number));
     }
@@ -701,6 +756,12 @@ Status DBImpl::InstallCompactionResults(CompactionState* compact) {
   return s;
 }
 
+/* 首先执行 compact 本身是不需要加锁的, 然后 DoCompactionWork() 调用时又是在加锁状态的, 所以
+ * DoCompactionWork() 的大致结构如下:
+ * 1. 趁着有锁这段时间做一下必须要有锁才能做的事, 比如更新 CompactionState::smallest_snapshot.
+ * 2. 执行 compact;
+ * 3. 执行收尾操作.
+ */
 Status DBImpl::DoCompactionWork(CompactionState* compact) {
   Log(env_, options_.info_log,  "Compacting %d@%d + %d@%d files",
       compact->compaction->num_input_files(0),
@@ -725,14 +786,32 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   input->SeekToFirst();
   Status status;
   ParsedInternalKey ikey;
+
+  /* 在了解这几个变量语义之前, 首先了解一下 input 值的模型, 对 input 进行遍历将产生如下序列:
+   * (ukey0, seqN), (ukey0, seqN-1), ..., (ukey0, seq0), (ukey1, seqM), (ukey2, seqQ), ...
+   *
+   * has_current_user_key 标识着 current_user_key 中是否存在值, 若为 false, 则表明不存在; 否则存在.
+   * current_user_key; 存放着当前正在处理的 user key 值, 如上 current_user_key 将依次为 ukey0, ukey1, ...
+   * last_sequence_for_key; 在处理 current_user_key 存放的 user key 期间, 上一个被处理的, 具有相同 user
+   * key 的 internal key 的 sequence 值. 如上在处理 ukey0 期间, last_sequence_for_key 将依次是:
+   * kMaxSequenceNumber, seqN, seqN-1, ... seq0. 这里当 current_user_key 变更时, last_sequence_for_key
+   * 总是会被置为 kMaxSequenceNumber. 按我理解是因为当 current_user_key 变更时, 上一个具有相同 user key 的
+   * internal key 不存在, 另外假设其存在, 那么 last_sequence_for_key > current internal key sequence,
+   * 所以这里将 last_sequence_for_key 置为了一个比 current internal key sequence 要大的值, 比如:
+   * kMaxSequenceNumber.
+   */
   std::string current_user_key;
   bool has_current_user_key = false;
   SequenceNumber last_sequence_for_key = kMaxSequenceNumber;
-  for (; input->Valid() && !shutting_down_.Acquire_Load(); ) {
+  for (; input->Valid() && !shutting_down_.Acquire_Load(); ) {  // 有必要检测 shutting_down_ 么==
+    // 1. 计算当前 input->key() 是否需要丢弃, 以及更新一些状态.
     // Handle key/value, add to state, etc.
     Slice key = input->key();
     bool drop = false;
     if (!ParseInternalKey(key, &ikey)) {
+      /* 此时表明 key 的格式不被 leveldb 理解, 我本来是以为这个会被丢弃的, 没想到 leveldb 是将 key 原样写入到
+       * compact output 中.
+       */
       // Do not hide error keys
       current_user_key.clear();
       has_current_user_key = false;
@@ -747,6 +826,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         last_sequence_for_key = kMaxSequenceNumber;
       }
 
+      /*
       if (last_sequence_for_key <= compact->smallest_snapshot) {
         // Hidden by an newer entry for same user key
         drop = true;    // (A)
@@ -760,6 +840,42 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         //     smaller sequence numbers will be dropped in the next
         //     few iterations of this loop (by rule (A) above).
         // Therefore this deletion marker is obsolete and can be dropped.
+        drop = true;
+      }*/
+      if (last_sequence_for_key > compact->smallest_snapshot) {
+        if (ikey.sequence > compact->smallest_snapshot) {
+          // 此时可能存在一个 snapshot, snapshot > smallest_snapshot, snapshot = ikey.sequence,
+          // 当用户通过 snapshot 来读取 leveldb, 预期情况是读取到 ikey, 所以此时 drop 不能为 true.
+        } else {  // ikey.sequence <= compact->smallest_snapshot
+          if (ikey.type != kTypeDeletion) {
+            // 此时 internal key 标识着一次 put 操作, 当用户通过 smallest snapshot 来读取 leveldb, 其
+            // 期望读取到 ikey, 所以 ikey 不能被移除.
+          } else {  // type == kTypeDeletion
+            // 本来按照我的理解, 此时 ikey 不应该被删除. 因为如果 ikey 被移除了, 那么用户几乎需要读取完
+            // leveldb 所有文件才能得到 ikey.user_key 不存在的结论; 反之如果 ikey 存在时, 那么当用户读取
+            // 到 ikey 时就可以得知 ikey.user_key 被删除了, 不存在了. 但是 leveldb 这里还是删除了 ikey,
+            // 大概是为了节省空间吧.
+
+            if (!compact->compaction->IsBaseLevelForKey(ikey.user_key)) {
+              // IsBaseLevelForKey() 返回 false, 表明在 >= compact level + 2 层可能存在
+              // (ikey.user_key(), seq0), 并且 seq0 < ikey.sequence.
+              // 此时举个例子来表明不能将 drop 置为 true 的原因; 假设当前 compact level3, 4;
+              // ikey.sequence = 10, smallest snapshot 为 10, 在 level7 中存在
+              // (ikey.user_key(), 1); 那么这里如果 drop ikey, 会导致通过 smallest snapshot 读取
+              // leveldb 时, 读取到 (ikey.user_key(), 1), 很显然这是错误的结果.
+            } else {
+              // IsBaseLevelForKey() 返回 true 表明 there is no data in higher levels(即 >=
+              // compact->compaction->level_ + 2); 并且根据 Version::files_ 中的定理可以
+              // 得出: data in lower levels will have larger sequence numbers; 并且根据上面的
+              // 规则 (3) data in layers that are being compacted... 可以得出此时可以安全地将
+              // drop 置为 true.
+              drop = true;
+            }
+          }
+        }
+      } else {  // last_sequence_for_key <= compact->smallest_snapshot
+        // 此时当用户通过 smallest_snapshot 读取 leveldb, 期望是读取到 prev internal key, 即
+        // last_sequence_for_key 对应的 internal key, 所以此时 ikey 总是可以被移除.
         drop = true;
       }
 
@@ -775,6 +891,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         (int)last_sequence_for_key, (int)compact->smallest_snapshot);
 #endif
 
+    // 2. 若 drop 为 true, 则丢弃, 调用 input Next() 方法处理下一个 key/value. 若 drop 为 false, 则写入
+    // 新文件中.
     if (!drop) {
       // Open output file if necessary
       if (compact->builder == NULL) {
@@ -783,17 +901,20 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
           break;
         }
       }
+      // 将未被丢弃的 key/value 写入 builder 中, 同时更新 output.
       if (compact->builder->NumEntries() == 0) {
         compact->current_output()->smallest.DecodeFrom(key);
       }
       compact->current_output()->largest.DecodeFrom(key);
 
+      // 这里当 ParseInternalKey() 出错时, ikey 未被正确地初始化. 实验表明此时 ikey.type = 0(kTypeDeletion)
+      // 所以此时很幸运地走向了 else 分支.
       if (ikey.type == kTypeLargeValueRef) {
-        if (input->value().size() != LargeValueRef::ByteSize()) {
+        if (input->value().size() != LargeValueRef::ByteSize()) {  // 确实需要检查一下哈
           if (options_.paranoid_checks) {
             status = Status::Corruption("invalid large value ref");
             break;
-          } else {
+          } else {  // 忽略本次 key/value.
             Log(env_, options_.info_log,
                 "compaction found invalid large value ref");
           }
@@ -822,12 +943,12 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   }
 
   if (status.ok() && shutting_down_.Acquire_Load()) {
-    status = Status::IOError("Deleting DB during compaction");
+    status = Status::IOError("Deleting DB during compaction");  // 此时会丢弃本次 compaction 结果.
   }
   if (status.ok() && compact->builder != NULL) {
     status = FinishCompactionOutputFile(compact, input);
   }
-  if (status.ok()) {
+  if (status.ok()) {  // 这一步是不是可以提前一点, 毕竟可以省了一次 FinishCompactionOutputFile() 操作了.
     status = input->status();
   }
   delete input;
@@ -1156,6 +1277,7 @@ Status DB::Open(const Options& options, const std::string& dbname,
   VersionEdit edit;
   Status s = impl->Recover(&edit); // Handles create_if_missing, error_if_exists
   if (s.ok()) {
+    // log number 的分配.
     impl->log_number_ = impl->versions_->NewFileNumber();
     WritableFile* lfile;
     s = options.env->NewWritableFile(LogFileName(dbname, impl->log_number_),
