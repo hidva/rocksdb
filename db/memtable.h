@@ -40,6 +40,8 @@ class MemTable {
   // while the returned iterator is live.  The keys returned by this
   // iterator are internal keys encoded by AppendInternalKey in the
   // db/dbformat.{h,cc} module.
+  //
+  // 这里 Iterator 仅是对 table_ 进行读操作, 而且 SkipList 读操作无需加锁, 所以这类使用 iterator 时无需加锁.
   Iterator* NewIterator();
 
   // Add an entry into memtable that maps key to value at the

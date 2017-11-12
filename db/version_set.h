@@ -86,15 +86,16 @@ class Version {
   VersionSet* vset_;            // VersionSet to which this Version belongs
   Version* next_;               // Next version in linked list
   int refs_;                    // Number of live refs to this version
-  // 按我理解 cleanup mem 存放着 Version level0 文件的部分内容, 当 leveldb 其他地方需要使用 Version 查找数据
-  // 时都会首先从 cleanupmem 中查找, 如果找不到再会去文件中查找.
+  /* cleanup_mem_ 是当前 Version 某个 level 0 table 文件在内存中的存在形式. 参见 MaybeDeleteOldVersions()
+   * 的实现来了解 cleanup mem 存在的意义.
+   */
   MemTable* cleanup_mem_;       // NULL, or table to delete when version dropped
 
   // List of files per level
   /* leveldb 中与 files_ 相关的几条定理:
    * 1. 如果在 L 层存在 (ukey, seq), 那么在任意 l 层, l < L, 找不到 (ukey, seq0), seq0 < seq.
    * 2. 如果 ukey 在每一层都存在, 且对应 seq 分别是: seq1, seq2, ..., seqMAXLEVEL; 那么 seq1 > seq2 >
-   *    ... > seqMAXLEVEL.
+   *    ... > seqMAXLEVEL. 如果 ukey 在 dbimpl memtable 与 level 0 中均存在, 那么 seqMEMTABLE > seq0;
    *
    * 定理 1 的证明: 假设存在 (ukey, seq0), 那么在 (ukey, seq) 经过一次次 compact 从 level0 下降到 L 层的过程
    * 中, 其势必会读取到 (ukey, seq0), 并且也会把 (ukey, seq0) 也带到 L 层中, 所以不存在这样的 (ukey, seq0).

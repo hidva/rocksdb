@@ -776,7 +776,10 @@ void VersionSet::MaybeDeleteOldVersions() {
   // Note: it is important to delete versions in order since a newer
   // version with zero refs may be holding a pointer to a memtable
   // that is used by somebody who has a ref on an older version.
-  // Q: 不理解为啥会有这样的局面?
+  // QA: 不理解为啥会有这样的局面?
+  // A: 参见 dbimpl versions_ 的文档说明, 一个读线程在读取的时候会持有 current version 的引用, 同时还会读取
+  // dbimpl 中的 memtable; 此时另外一个写线程可能会执行 CompactMemTable() 操作, 生成一个新 version, 并将
+  // dbimpl 中的 memtable 作为新 version 的 cleanup mem.
   while (oldest_ != current_ && oldest_->refs_ == 0) {
     Version* next = oldest_->next_;
     delete oldest_;

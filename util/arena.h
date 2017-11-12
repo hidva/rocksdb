@@ -13,7 +13,7 @@
 namespace leveldb {
 
 
-// 实现未细看.
+// 实现未细看. 不过目测并发不安全.
 class Arena {
  public:
   Arena();

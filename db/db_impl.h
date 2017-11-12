@@ -37,7 +37,9 @@ class DBImpl : public DB {
   virtual Iterator* NewIterator(const ReadOptions&);
   virtual const Snapshot* GetSnapshot();
   virtual void ReleaseSnapshot(const Snapshot* snapshot);
+  // 这么粗暴的接口? 为啥不提供个成员函数呢?
   virtual bool GetProperty(const Slice& property, uint64_t* value);
+  // 我觉得这个函数没啥意义吧?
   virtual void GetApproximateSizes(const Range* range, int n, uint64_t* sizes);
 
   // Extra methods (for testing) that are not in the public DB interface
@@ -99,6 +101,7 @@ class DBImpl : public DB {
 
   // Called when an iterator over a particular version of the
   // descriptor goes away.
+  // Unref 会对 dbimpl mutex_ 加锁啊!
   static void Unref(void* arg1, void* arg2);
 
   // Compact the in-memory write buffer to disk.  Switches to a new
@@ -216,6 +219,9 @@ class DBImpl : public DB {
    */
   bool compacting_;
 
+  /* 任何时刻只要对 mutex_ 加锁成功, 那么当前 versions_->current() + mem_ 就存放着当前 leveldb 数据库的全部
+   * 数据.
+   */
   VersionSet* versions_;
 
   // Have we encountered a background error in paranoid mode?

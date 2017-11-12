@@ -94,7 +94,8 @@ Options SanitizeOptions(const std::string& dbname,
                         const Options& src) {
   Options result = src;
   result.comparator = icmp;
-  // Q: 这些限制值有什么科学道理么?
+  // QA: 这些限制值有什么科学道理么?
+  // A: 当我看完了 leveldb 所有实现之后, 我觉得这里就是随心而欲设置的值吧
   ClipToRange(&result.max_open_files,           20,     50000);
   ClipToRange(&result.write_buffer_size,        64<<10, 1<<30);
   ClipToRange(&result.large_value_threshold,    16<<10, 1<<30);
@@ -308,7 +309,8 @@ Status DBImpl::Recover(VersionEdit* edit) {
   // Ignore error from CreateDir since the creation of the DB is
   // committed only when the descriptor is created, and this directory
   // may already exist from a previous failed creation attempt.
-  // Q: committed only when 啥意思?
+  // QA: committed only when 啥意思?
+  // A: 我已经看完了 leveldb 所有实现, 仍然不知道这句话啥意思, 那就算了吧
   env_->CreateDir(dbname_);
   assert(db_lock_ == NULL);
   Status s = env_->LockFile(LockFileName(dbname_), &db_lock_);
@@ -980,9 +982,9 @@ Iterator* DBImpl::NewInternalIterator(const ReadOptions& options,
   versions_->current()->AddIterators(options, &list);
   Iterator* internal_iter =
       NewMergingIterator(&internal_comparator_, &list[0], list.size());
-  versions_->current()->Ref();
+  versions_->current()->Ref();  // 哦哦忘了 ref==
   internal_iter->RegisterCleanup(&DBImpl::Unref, this, versions_->current());
-
+  // 如果我们这里 delete internal_iter; 那么就会死锁啊!
   mutex_.Unlock();
   return internal_iter;
 }

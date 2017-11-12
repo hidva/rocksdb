@@ -29,6 +29,9 @@ static void DumpInternalIter(Iterator* iter) {
 
 namespace {
 
+/* 在看该类时要时刻脑补着 leveldb 数据库中数据的模型:
+ * (ukey0, seq0), (ukey0, seq1), ..., (ukey1, seq2), ...
+ */
 // Memtables and sstables that make the DB representation contain
 // (userkey,seq,type) => uservalue entries.  DBIter
 // combines multiple entries for the same userkey found in the DB
@@ -64,6 +67,7 @@ class DBIter: public Iterator {
       if (!large_->produced) {
         ReadIndirectValue();
       }
+      // 你说这是图啥啊, 非得延迟读取, 这时候如果 ReadIndirectValue() 出错了, 用户都不能及时知道!
       return large_->value;
     }
   }
@@ -110,6 +114,7 @@ class DBIter: public Iterator {
   void SaveKey(const Slice& k) { key_.assign(k.data(), k.size()); }
   void SaveValue(const Slice& v) {
     if (value_.capacity() > v.size() + 1048576) {
+      // 图啥啊, 多用你 1048576 字节怎么了!
       std::string empty;
       swap(empty, value_);
     }
@@ -121,6 +126,19 @@ class DBIter: public Iterator {
 
   void ReadIndirectValue() const;
 
+  /* DBIter 实现了延迟打开 large value. 即对于一个 large value, 仅当用户调用了 iter->value() 时才会打开
+   * large value file, 读取并解压其内容.
+   *
+   * produced 若为真, 则表明 value 中存放着 large value 实际内容. 若为 false, 则表明 value 中存放了
+   * LargeValueRef::data.
+   *
+   * status 用来表明打开 large value file, 读取并解压其内容期间有没有出错.
+   *
+   * mutex 用来保护其他所有成员.
+   *
+   * 按我理解这里不需要使用 mutex 的啊! 因为 DBIter 自身不是线程安全的, 所以同一个 iter 对象的 value() 不会
+   * 同时被多个线程中调用.
+   */
   struct Large {
     port::Mutex mutex;
     std::string value;
@@ -133,14 +151,18 @@ class DBIter: public Iterator {
 
   const Comparator* const user_comparator_;
 
-  // iter_ is positioned just past current entry for DBIter if valid_
+  // 不变量00: iter_ is positioned just past current entry for DBIter if valid_
+  // 由 dbimpl NewInternalIterator() 分配.
   Iterator* const iter_;
 
   SequenceNumber const sequence_;
   Status status_;
   std::string key_;                  // Always a user key
+  // large_, value_ 保存了 key_ 对应的值. 若 large_ 为 NULL, 则表明 key_ 对应的值存放在 value_ 中. 若
+  // large_ 不为 NULL, 则表明 key_ 是一个 large value key.
   std::string value_;
   Large* large_;      // Non-NULL if value is an indirect reference
+  // 若为真, 则表明当前 key_ 有意义. 否则无意义.
   bool valid_;
 
   // No copying allowed
@@ -148,6 +170,7 @@ class DBIter: public Iterator {
   void operator=(const DBIter&);
 };
 
+// parse iter->key(), 并将结果写入 ikey 中. 返回 true/false 表明解析结果.
 inline bool DBIter::ParseKey(ParsedInternalKey* ikey) {
   if (!ParseInternalKey(iter_->key(), ikey)) {
     status_ = Status::Corruption("corrupted internal key in DBIter");
@@ -157,8 +180,14 @@ inline bool DBIter::ParseKey(ParsedInternalKey* ikey) {
   }
 }
 
+/* 该函数会一直 next iter_, 直至 iter_ 不再 valid; 或者找到了一个在 sequence_ 下存在的 user_key, 此时会设置
+ * key_, value_, valid_ 等变量, 并使用 SkipPast() 来调整 iter_.
+ */
 void DBIter::FindNextUserEntry() {
   if (large_ != NULL) {
+    // 如果 large_ 不为 NULL, 那么这里需要 delete, 并且如果上一个 large 在读取 large file 时出错那么这里还需要
+    // 保存一下出错状态.
+    // 这里不对 large 进行加锁之后才获取其 status 么.
     if (status_.ok() && !large_->status.ok()) {
       status_ = large_->status;
     }
@@ -168,7 +197,7 @@ void DBIter::FindNextUserEntry() {
   while (iter_->Valid()) {
     ParsedInternalKey ikey;
     if (!ParseKey(&ikey)) {
-      // Skip past corrupted entry
+      // Skip past corrupted entry. 我的想法是此时终止遍历.
       iter_->Next();
       continue;
     }
@@ -215,6 +244,7 @@ void DBIter::FindNextUserEntry() {
   assert(large_ == NULL);
 }
 
+// 当该函数返回时, iter_ 要么为 !Valid(), 要么 iter->key().userkey() != k;
 void DBIter::SkipPast(const Slice& k) {
   while (iter_->Valid()) {
     ParsedInternalKey ikey;
@@ -224,6 +254,7 @@ void DBIter::SkipPast(const Slice& k) {
     //     <corrupted entry for user key x>
     //     <x,50,v> => value50
     // we will skip over the corrupted entry as well as value50.
+    // 就怕当 corrupted entry for user key x 也污染了 value50 咯~
     if (ParseKey(&ikey) && user_comparator_->Compare(ikey.user_key, k) != 0) {
       break;
     }
@@ -266,6 +297,13 @@ void DBIter::FindPrevUserEntry() {
   // for the preceding example in the first iteration of the while loop
   // below.  There may be more than one iteration either if there are
   // no live values for B, or if there is a corruption.
+  /* 在每一次循环开始之前, iter_ 要么 Valid() == false; 要么 Valid == true, 此时
+   * key_ = iter_->key().userkey().
+   *
+   * FindPrevUserEntry() 会首先使用 ScanUntilBeforeCurrentKey() 来判断 key_ 在 sequence 下是否存在; 如果
+   * 存在则使用 FindNextUserEntry() 来更新 key_, value_ 等变量; 若不存在, 则使用
+   * ScanUntilBeforeCurrentKey() 发现的比 key_ 更小的 key 再一次尝试.
+   */
   while (iter_->Valid()) {
     std::string saved = key_;
     bool found_live;
@@ -278,6 +316,7 @@ void DBIter::FindPrevUserEntry() {
       } else {
         iter_->Next();
       }
+      // 此时 iter->Valid() 为 true.
       // (first iteration) iter_ at B@300
 
       FindNextUserEntry();  // Sets key_ to the key of the next value it found
@@ -285,6 +324,7 @@ void DBIter::FindPrevUserEntry() {
         // (first iteration) iter_ at C@301
         return;
       }
+      // 我觉得不可能走到这里的!
 
       // FindNextUserEntry() could not find any entries under the
       // user key "saved".  This is probably a corruption since
@@ -293,7 +333,7 @@ void DBIter::FindPrevUserEntry() {
       // entries for "saved".
       //
       // (first iteration) iter_ at C@301 and saved == "B"
-      key_ = saved;
+      key_ = saved;  // 此时 key_ 的状态不定, 所以将其设置为一个确定性的状态.
       bool ignored;
       ScanUntilBeforeCurrentKey(&ignored);
       // (first iteration) iter_ at A@400
@@ -304,8 +344,16 @@ void DBIter::FindPrevUserEntry() {
   value_.clear();
 }
 
+/* 另 savedkey = key_. 当该函数 return 时, 此时 iter_ 要么 !Valid(); 要么 iter_->key().userkey() 在
+ * sequence_ 下存在, 而且其小于 savedkey, 此时会将其修改为 key_ 的值.
+ *
+ * 当该函数返回时, 若 found_live 为 true, 则表明 savedkey 在 sequence_ 下存在; 若为 false, 则表明不存在.
+ */
 void DBIter::ScanUntilBeforeCurrentKey(bool* found_live) {
   *found_live = false;
+  // QA: 不清楚为啥要来这么一出?
+  // A: 参见 Prev() 实现, 由于不变量00 的存在, 当 valid_ 为 true, key_ 为当前数据库中最后一个元素时, 此时
+  // iter_ 处于最后一个元素的下一个位置, 类似 std::vector::end 的存在, 所以此时需要调整 iter_.
   if (!iter_->Valid()) {
     iter_->SeekToLast();
   }
@@ -339,6 +387,7 @@ void DBIter::ScanUntilBeforeCurrentKey(bool* found_live) {
           break;
       }
     } else {  // cmp > 0
+      // 此时可以证明 found_live 一定为 false, 所以这里没有必要再一次设置为 false.
       *found_live = false;
     }
 
@@ -356,6 +405,7 @@ void DBIter::ReadIndirectValue() const {
   }
   memcpy(large_ref.data, value_.data(), LargeValueRef::ByteSize());
   std::string fname = LargeValueFileName(*dbname_, large_ref);
+  // 为啥不使用 ReadFileToString() 来读取呢?
   RandomAccessFile* file;
   Status s = env_->NewRandomAccessFile(fname, &file);
   if (s.ok()) {
@@ -388,6 +438,7 @@ void DBIter::ReadIndirectValue() const {
         }
       } else {
         s = Status::Corruption("Unable to read entire large value file");
+        // 大哥你就不能再一次 read 么.
       }
     }
     delete file;        // Ignore errors on closing
