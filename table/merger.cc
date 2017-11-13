@@ -18,7 +18,10 @@ namespace {
  * 排序得到一个有序的序列, MergingIterator 就是在这个有序的序列上进行遍历.
  *
  * 在实现上, 我认为要遵守一个不变量 "任何一个时刻, current_->key() 始终是所有 children->key() 中最小的那个".
- * 但是 google 并没有这么做==
+ * 但是 google 并没有这么做==.
+ *
+ * 这个版本的 MergingIterator 有很大 bug, 参考最新版 leveldb 实现. MergingIterator 仅使用元素不会重复的情况,
+ * 当元素重复时, 就算是最新版 leveldb 实现也存在一个 bug.
  */
 class MergingIterator : public Iterator {
  public:
@@ -61,8 +64,9 @@ class MergingIterator : public Iterator {
     FindSmallest();
   }
 
-  // Q: Next(), Prev() 实现貌似存在 bug. 已经在 merger-test 分支写好验证程序并验证了, 但是还有一点不确定, 等待
+  // QA: Next(), Prev() 实现貌似存在 bug. 已经在 merger-test 分支写好验证程序并验证了, 但是还有一点不确定, 等待
   // 有缘人解答==
+  // A: 在元素不重复的情况下, 该 bug 并不存在, 事实上在整个 leveldb 中, 元素都是不重复的.
   virtual void Next() {
     assert(Valid());
     current_->Next();
