@@ -3,6 +3,7 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 //
 // We recover the contents of the descriptor from the other files we find.
+// 这里的恢复思路倒是值得参考. 以及将 repair 过程中出错的文件移到 lost 目录下也值得借鉴.
 // (1) Any log files are first converted to tables
 // (2) We scan every table to compute
 //     (a) smallest/largest for the table
@@ -21,10 +22,18 @@
 //   (b) Sort tables by largest sequence# in the table
 //   (c) For each table: if it overlaps earlier table, place in level-0,
 //       else place in level-M.
+//   这个我倒觉得没啥必要, 就都放在 level0 让他慢慢 compact 呗, 感觉挺好玩的==
 // Possible optimization 2:
 //   Store per-table metadata (smallest, largest, largest-seq#,
 //   large-value-refs, ...) in the table's meta section to speed up
 //   ScanTable.
+//
+// Q: 如果在 leveldb 执行 BackgroundCompaction() 期间 kill leveldb, 那么可能会导致 (ukey, seq) 同时存在与
+// (lvlN, fileno.sst), (lvlN+1, fileno.sst) 两个 sst 文件中. 如果这时候在执行 RepairDB(), 就会导致
+// RepairDB() 之后的 leveldb 存在相同的 (ukey, seq). 此时会导致一些问题, 比如 MergingIterator 在元素可能会
+// 重复的情况会出问题; 使用 DB::NewIterator() 遍历 leveldb 时可能会吐出相同的 ukey 等. 所以在 RepairDB() 之后
+// 执行一次 Compaction 是不是会好点?
+//
 
 #include "db/builder.h"
 #include "db/db_impl.h"
@@ -54,6 +63,8 @@ class Repairer {
         owns_info_log_(options_.info_log != options.info_log),
         next_file_number_(1) {
     // TableCache can be small since we expect each table to be opened once.
+    // 期望之中, 任何一个 table file 不会被打开两次以上, 所以 table cache 中的项几乎不会被命中, 因此这里将
+    // cache 大小设置地很小.
     table_cache_ = new TableCache(dbname_, &options_, 10);
   }
 
@@ -67,6 +78,7 @@ class Repairer {
   Status Run() {
     Status status = FindFiles();
     if (status.ok()) {
+      // 这里的步骤与上面的 (1), (2), (3) 一一对应啊.
       ConvertLogFilesToTables();
       ExtractMetaData();
       status = WriteDescriptor();
@@ -100,8 +112,9 @@ class Repairer {
   Options const options_;
   bool owns_info_log_;
   TableCache* table_cache_;
-  VersionEdit edit_;
+  VersionEdit edit_;  // 存放着 repair 的过程中, 所有对 server state 的变更.
 
+  // 存放着在 FindFiles() 过程中发现的 descriptor 文件, 所有这些文件都会被移动 lost 目录下.
   std::vector<std::string> manifests_;
   std::vector<uint64_t> table_numbers_;
   std::vector<uint64_t> logs_;
@@ -153,7 +166,7 @@ class Repairer {
             (unsigned long long) logs_[i],
             status.ToString().c_str());
       }
-      ArchiveFile(logname);
+      ArchiveFile(logname);  // 真谨慎.
     }
   }
 
@@ -262,7 +275,7 @@ class Repairer {
     if (status.ok()) {
       Iterator* iter = table_cache_->NewIterator(
           ReadOptions(), t->meta.number);
-      bool empty = true;
+      bool empty = true;  // 通过 counter 也可以判断出来啊~
       ParsedInternalKey parsed;
       t->max_sequence = 0;
       for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
