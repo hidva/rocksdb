@@ -49,6 +49,7 @@ static int FLAGS_value_size = 100;
 
 // Arrange to generate values that shrink to this fraction of
 // their original size after compression
+// Q: 这啥意思啊? 是 generate values, 这些 values 经过压缩之后大小会变为原来的 25%? 这么 6 么?
 static double FLAGS_compression_ratio = 0.25;
 
 // Print histogram of operation timings
@@ -95,6 +96,7 @@ class RandomGenerator {
 
 class Benchmark {
  private:
+  // Q: Benchmark 各个数据成员有何意义?
   Cache* cache_;
   DB* db_;
   int num_;
@@ -191,6 +193,7 @@ class Benchmark {
     std::vector<std::string> files;
     Env::Default()->GetChildren("/tmp/dbbench", &files);
     for (int i = 0; i < files.size(); i++) {
+      // Q: 这个文件干啥用的?
       if (Slice(files[i]).starts_with("heap-")) {
         Env::Default()->DeleteFile("/tmp/dbbench/" + files[i]);
       }
@@ -353,6 +356,9 @@ int main(int argc, char** argv) {
     char junk;
     if (leveldb::Slice(argv[i]).starts_with("--benchmarks=")) {
       FLAGS_benchmarks = argv[i] + strlen("--benchmarks=");
+    /* 这里利用 sscanf 在解析的同时判断取值合法性真是 6 爆了! 试想 `--compression_ratio=3.23xx` 当 3.23 后跟
+     * 任何非法数字字符时都会被填充到 junk, 都会导致 sscan() 返回 2.
+     */
     } else if (sscanf(argv[i], "--compression_ratio=%lf%c", &d, &junk) == 1) {
       FLAGS_compression_ratio = d;
     } else if (sscanf(argv[i], "--histogram=%d%c", &n, &junk) == 1 &&

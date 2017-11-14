@@ -125,8 +125,10 @@ class DB {
   void operator=(const DB&);
 };
 
-// Q: 既然上面的 DB class 仅是一个 interface, 那么 DestroyDB(), RepairDB() 是如何得到 name 对应 db 对应
+// QA: 既然上面的 DB class 仅是一个 interface, 那么 DestroyDB(), RepairDB() 是如何得到 name 对应 db 对应
 // 的 DB implemention 的呢?
+// A: 怎么说呢? 这是一个假 interface, leveldb 之所以将这里作为 interface 是因为不想让太多的实现暴露在这个头文件
+// 中, 就像他们整出来一个 WriteBatchInternal 一样.
 
 // Destroy the contents of the specified database.
 // Be very careful using this method.
