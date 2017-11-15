@@ -72,6 +72,7 @@ double Histogram::Percentile(double p) const {
       double right_sum = sum;
       double pos = (threshold - left_sum) / (right_sum - left_sum);
       double r = left_point + (right_point - left_point) * pos;
+      // 这两个判断用来处理 p = 0 或者 p = 100.0 的情况.
       if (r < min_) r = min_;
       if (r > max_) r = max_;
       return r;
@@ -87,6 +88,7 @@ double Histogram::Average() const {
 
 double Histogram::StandardDeviation() const {
   if (num_ == 0.0) return 0;
+  // 参见 wiki 中标准差的公式.
   double variance = (sum_squares_ * num_ - sum_ * sum_) / (num_ * num_);
   return sqrt(variance);
 }

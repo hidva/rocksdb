@@ -102,19 +102,22 @@ class Benchmark {
   int num_;
   bool sync_;
   int heap_counter_;
-  double start_;
-  double last_op_finish_;
-  int64_t bytes_;
+  double start_;  // Q: 目测是一项 benchmark 的开始时间.
+  double last_op_finish_;  // Q: 目测是在一项 benchmark 中上一个操作的结束时间.
+  int64_t bytes_;  // Q: 目测是一项 benchmark 读或写的字节数.
   std::string message_;
-  Histogram hist_;
+  Histogram hist_;  // Q: 目测存放着一项 benchmark 每次操作的耗时.
   RandomGenerator gen_;
   Random rand_;
 
   // State kept for progress messages
-  int done_;
+  int done_;  // Q: 目测存放着一项 benchmark 的操作总次数.
+  // Q: 目测是用来控制一项 benchmark 中何时 report 的个东西, 比如初始为 100, 每次 op 操作完成后减一, 当为 0
+  // 时表明该 report 了, 就 report 一下.
   int next_report_;     // When to report next
 
-  void Start() {
+  void Start() {  // Q: 目测是一项 benchmark 的开始.
+    // 这里乘以 10^-6, 而不是除以 10^6 是因为乘法效果高于除法么
     start_ = Env::Default()->NowMicros() * 1e-6;
     bytes_ = 0;
     message_.clear();
@@ -129,7 +132,7 @@ class Benchmark {
       double now = Env::Default()->NowMicros() * 1e-6;
       double micros = (now - last_op_finish_) * 1e6;
       hist_.Add(micros);
-      if (micros > 20000) {
+      if (micros > 20000) {  // 20ms
         fprintf(stderr, "long op: %.1f micros%30s\r", micros, "");
         fflush(stderr);
       }
@@ -152,7 +155,7 @@ class Benchmark {
     }
   }
 
-  void Stop(const Slice& name) {
+  void Stop(const Slice& name) {  // Q: 目测是一项 benchmark 的结束.
     double finish = Env::Default()->NowMicros() * 1e-6;
 
     // Pretend at least one op was done in case we are running a benchmark
