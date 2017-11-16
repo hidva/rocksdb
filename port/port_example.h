@@ -111,6 +111,7 @@ extern bool Lightweight_Uncompress(const char* input_data, size_t input_length,
 // If heap profiling is not supported, returns false.
 // Else repeatedly calls (*func)(arg, data, n) and then returns true.
 // The concatenation of all "data[0,n-1]" fragments is the heap profile.
+// 可以参考 db_bench 中对 GetHeapProfile() 的使用来了解.
 extern bool GetHeapProfile(void (*func)(void*, const char*, int), void* arg);
 
 }

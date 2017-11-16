@@ -512,6 +512,9 @@ Status DBImpl::CompactMemTable() {
   return s;
 }
 
+/* 按我理解 TEST_CompactRange() 是用来测试 BackgroundCompaction 的性能, 那么其逻辑是不是也要与
+ * BackgroundCompaction() 相符一点, 比如 BackgroundCompaction() 中的 fast path 这里是不是也要加上?
+ */
 void DBImpl::TEST_CompactRange(
     int level,
     const std::string& begin,
@@ -527,7 +530,7 @@ void DBImpl::TEST_CompactRange(
 
   if (c != NULL) {
     CompactionState* compact = new CompactionState(c);
-    DoCompactionWork(compact);  // Ignore error in test compaction
+    DoCompactionWork(compact);  // Ignore error in test compaction, 这样真的好么?
     CleanupCompaction(compact);
   }
 

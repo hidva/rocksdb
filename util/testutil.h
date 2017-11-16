@@ -23,6 +23,7 @@ extern std::string RandomKey(Random* rnd, int len);
 // Store in *dst a string of length "len" that will compress to
 // "N*compressed_fraction" bytes and return a Slice that references
 // the generated data.
+// 这里很神奇啊, 按我理解生成具有指定压缩比的字符串不得有一个指定的压缩算法绑定么==
 extern Slice CompressibleString(Random* rnd, double compressed_fraction,
                                 int len, std::string* dst);
 

@@ -15,6 +15,8 @@
 #include "util/random.h"
 #include "util/testutil.h"
 
+// 这里就以 FLAGS_ 作为前缀时是因为就有了 gflags 的雏形了么?
+
 // Comma-separated list of operations to run in the specified order
 //   Actual benchmarks:
 //      writeseq    -- write N values in sequential key order
@@ -42,6 +44,8 @@ static const char* FLAGS_benchmarks =
     "writebig";
 
 // Number of key/values to place in database
+// 更准确地说 FLAGS_num 标识着在 writeseq 等 benchmark 中初始的操作执行次数. 可以通过 tenth, normal 指令来
+// 调整实际的操作执行次数.
 static int FLAGS_num = 1000000;
 
 // Size of each value
@@ -49,7 +53,8 @@ static int FLAGS_value_size = 100;
 
 // Arrange to generate values that shrink to this fraction of
 // their original size after compression
-// Q: 这啥意思啊? 是 generate values, 这些 values 经过压缩之后大小会变为原来的 25%? 这么 6 么?
+// QA: 这啥意思啊? 是 generate values, 这些 values 经过压缩之后大小会变为原来的 25%? 这么 6 么?
+// A: 就是这么个意思, 参见 CompressibleString() 实现.
 static double FLAGS_compression_ratio = 0.25;
 
 // Print histogram of operation timings
@@ -62,6 +67,8 @@ namespace leveldb {
 
 // Helper for quickly generating random data.
 namespace {
+
+// RandomGenerator, 代码看不懂了, 但是并不是很理解. 不过以后在生成随机字符串的场合可以参考该类的实现.
 class RandomGenerator {
  private:
   std::string data_;
@@ -72,6 +79,7 @@ class RandomGenerator {
     // We use a limited amount of data over and over again and ensure
     // that it is larger than the compression window (32KB), and also
     // large enough to serve all typical value sizes we want to write.
+    // Q: compression window 啥意思?
     Random rnd(301);
     std::string piece;
     while (data_.size() < 1048576) {
@@ -94,29 +102,43 @@ class RandomGenerator {
 };
 }
 
+/* 在该类实现中, 一项 benchmark 在开始时应该调用 Start(), 在结束之后调用 Stop(), 在这项 benchmark 内每一步
+ * 操作完成之后调用 FinishedSingleOp().
+ *
+ * 今后在需要 benchmark 的场合可以参考这里的实现.
+ *
+ * Benchmark 中所有随机数生成器的种子都初始化为一个固定值: 301, 按我理解是想让每次 benchmark 都运行在固定的环境中.
+ */
 class Benchmark {
  private:
-  // Q: Benchmark 各个数据成员有何意义?
-  Cache* cache_;
+  Cache* cache_;  // 用作 options 中的 block_cache.
   DB* db_;
+  // 存放着后续 writeseq 等 benchmark 的操作执行次数. 初始值为 FLAGS_num, 可以通过 tenth 等指令来调整.
   int num_;
+  // 作为后续 writeseq 等 benchmark 中 WriteOptions::sync 的值.
   bool sync_;
+  // 参见其使用场所.
   int heap_counter_;
-  double start_;  // Q: 目测是一项 benchmark 的开始时间.
-  double last_op_finish_;  // Q: 目测是在一项 benchmark 中上一个操作的结束时间.
-  int64_t bytes_;  // Q: 目测是一项 benchmark 读或写的字节数.
+  // 一项 benchmark 的开始时间.
+  double start_;
+  // 一项 benchmark 中上一次操作的结束时间
+  double last_op_finish_;
+  // 一项 benchmark 读或写的字节数.
+  int64_t bytes_;
+  // 用来在一项 benchmark 中存放一些文本信息, 参见其使用场景.
   std::string message_;
-  Histogram hist_;  // Q: 目测存放着一项 benchmark 每次操作的耗时.
+  // 存放着一项 benchmark 每次操作的耗时.
+  Histogram hist_;
   RandomGenerator gen_;
   Random rand_;
 
   // State kept for progress messages
-  int done_;  // Q: 目测存放着一项 benchmark 的操作总次数.
-  // Q: 目测是用来控制一项 benchmark 中何时 report 的个东西, 比如初始为 100, 每次 op 操作完成后减一, 当为 0
-  // 时表明该 report 了, 就 report 一下.
+  // 存放着一项 benchmark 的操作总次数.
+  int done_;
+  // 用来控制一项 benchmark 中何时输出进度这类信息的个东西. 参见其使用场景.
   int next_report_;     // When to report next
 
-  void Start() {  // Q: 目测是一项 benchmark 的开始.
+  void Start() {
     // 这里乘以 10^-6, 而不是除以 10^6 是因为乘法效果高于除法么
     start_ = Env::Default()->NowMicros() * 1e-6;
     bytes_ = 0;
@@ -132,7 +154,7 @@ class Benchmark {
       double now = Env::Default()->NowMicros() * 1e-6;
       double micros = (now - last_op_finish_) * 1e6;
       hist_.Add(micros);
-      if (micros > 20000) {  // 20ms
+      if (micros > 20000) {  // 20 ms
         fprintf(stderr, "long op: %.1f micros%30s\r", micros, "");
         fflush(stderr);
       }
@@ -155,7 +177,7 @@ class Benchmark {
     }
   }
 
-  void Stop(const Slice& name) {  // Q: 目测是一项 benchmark 的结束.
+  void Stop(const Slice& name) {
     double finish = Env::Default()->NowMicros() * 1e-6;
 
     // Pretend at least one op was done in case we are running a benchmark
@@ -196,12 +218,13 @@ class Benchmark {
     std::vector<std::string> files;
     Env::Default()->GetChildren("/tmp/dbbench", &files);
     for (int i = 0; i < files.size(); i++) {
-      // Q: 这个文件干啥用的?
+      // QA: 这个文件干啥用的?
+      // A: 用来存放 port::GetHeapProfile() 的结果. 参见 HeapProfile() 的实现
       if (Slice(files[i]).starts_with("heap-")) {
         Env::Default()->DeleteFile("/tmp/dbbench/" + files[i]);
       }
     }
-    DestroyDB("/tmp/dbbench", Options());
+    DestroyDB("/tmp/dbbench", Options());  // 在每次 benchmark 之前清除上一次 benchmark 的结果.
   }
 
   ~Benchmark() {
@@ -224,6 +247,7 @@ class Benchmark {
       exit(1);
     }
 
+    // 这里感觉就像一个 VM.
     const char* benchmarks = FLAGS_benchmarks;
     while (benchmarks != NULL) {
       const char* sep = strchr(benchmarks, ',');
@@ -273,6 +297,7 @@ class Benchmark {
     WriteOptions options;
     options.sync = sync_;
     for (int i = 0; i < num_entries; i++) {
+      // 这里为啥要取余? 直接使用 rand_.Next() 不行么?
       const int k = (order == SEQUENTIAL) ? i : (rand_.Next() % FLAGS_num);
       char key[100];
       snprintf(key, sizeof(key), "%012d", k);
@@ -300,6 +325,8 @@ class Benchmark {
       }
       delete iter;
     } else {
+      // read random 这里没有统计 bytes_, 我本来以为是疏漏了, 没想到最新版 rocksdb 也没有更新, 所以大概是有
+      // 科学道理的.
       std::string value;
       for (int i = 0; i < num_; i++) {
         char key[100];
@@ -311,6 +338,7 @@ class Benchmark {
     }
   }
 
+  // 这里的 compact 很粗糙啊
   void Compact() {
     DBImpl* dbi = reinterpret_cast<DBImpl*>(db_);
     dbi->TEST_CompactMemTable();
