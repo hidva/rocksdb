@@ -1,5 +1,5 @@
 The log file contents are a sequence of 32KB blocks.  The only
-exception is that the tail of the file may contain a partial block.
+exception is that the tail of the file may contain a partial block, 即不足 32kb.
 
 Each block consists of a sequence of records:
    block := record* trailer?
@@ -18,7 +18,7 @@ must skip these trailer bytes and add the record to the next block.
 
 More types may be added in the future.  Some Readers may skip record
 types they do not understand, others may report that some data was
-skipped.
+skipped. 按我理解这里是说一些 reader impl 可以 skip record types they do not understand sliently, 另外一些 reader impl 在遇到不识别的 record type 时可以调用 Reader::Reporter 来报告一下.
 
 FULL == 1
 FIRST == 2
@@ -48,6 +48,8 @@ be left empty as the trailer.
 C will be stored as a FULL record in the fourth block.
 
 ===================
+
+按我理解, recordio format 是指 log file 由一个个的 record 组成. leveldb 这里采用的是 blockio 与 recordio 的组合, 即 log file 由一个个的 block 组成, 然后 block 内又有一个个 record 组成. 这里介绍的 leveldb 使用的 format 与 recordio 使用的 format 之间的优缺点, 但我并没有怎么看懂.
 
 Some benefits over the recordio format:
 

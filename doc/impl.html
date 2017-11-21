@@ -178,6 +178,10 @@ Perhaps most of the level-0 files will have their blocks sitting
 uncompressed in the cache and we will only need to worry about the
 O(N) complexity in the merging iterator.
 
+<br />
+Q: 这个我就有点不理解了, 按我理解根据上文这类 very wide merges 应该是指 level-L, level-(L+1) (L>1) 之间的 compaction. 在 io 面前, MergingIterator::Next() O(N) 的时间复杂度, 这里 N 应该是指 MergingIterator 构造函数中的参数 n, 应该不是主要考虑的问题吧?
+</p>
+
 <h2>Number of files</h2>
 
 Instead of always making 2MB files, we could make larger files for
@@ -198,6 +202,8 @@ varying number of files:
 So maybe even the sharding is not necessary on modern filesystems?
 
 <h1>Recovery</h1>
+
+根据代码来看, 这里介绍的应该是 <pre>DB::Open()</pre> 的逻辑.
 
 <ul>
 <li> Read CURRENT to find name of the latest committed MANIFEST

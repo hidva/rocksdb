@@ -77,6 +77,11 @@ struct Options {
   // of this parameter.  Therefore we recommend against increasing
   // this parameter unless you are willing to live with an occasional
   // slow operation in exchange for faster bulk loading throughput.
+  // occasional slow operation 按我理解, 在 DB::Write() 时有一个 CompactMemTable() 步骤, 而且
+  // CompactMemTable() 与 write buffer size 成正比, 所以当 write buffer size 越大将导致 DB::Write() 间歇
+  // 性变慢.
+  //
+  // Q: faster bulk loading throughput 啥意思?
   //
   // Default: 1MB
   size_t write_buffer_size;
@@ -109,7 +114,7 @@ struct Options {
   // block size specified here corresponds to uncompressed data.  The
   // actual size of the unit read from disk may be smaller if
   // compression is enabled.  This parameter can be changed dynamically.
-  //
+  // 但目前并没有提供接口来 动态地调整 block size, 下同.
   // Default: 8K
   int block_size;
 
