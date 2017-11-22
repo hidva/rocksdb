@@ -15,6 +15,10 @@ class SequentialFile;
 
 namespace log {
 
+/* 当 ReadRecord() 返回 false 时, 若 Corruption() 从未被掉用过, 那么表明这是一次非常成功的 read, 文件的内容全
+ * 部被读取消化了. 若 Corruption() 被调用过, 那么表明读取遇到了错误, 可能是底层 io 出错也可能是文件内容不合法,
+ * 此时文件内容可能未被消耗完.
+ */
 class Reader {
  public:
   // Interface for reporting errors.
