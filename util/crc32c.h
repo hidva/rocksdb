@@ -8,6 +8,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* leveldb 内部对于 crc32c 的使用方式总是: 首先使用 Extend/Value 计算出 crc32; 然后再使用 Mask/Unmask 对计算
+ * 出来的 crc32 稍作修试; 最后以小端模式存储.
+ */
+
 namespace leveldb {
 namespace crc32c {
 

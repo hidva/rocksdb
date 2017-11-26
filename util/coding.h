@@ -8,6 +8,11 @@
 // Q: 为啥不采用网络字节序? 这样在 EncodeFixed32/64() 时还可以使用库函数 ntohl() 等能提高点效率.
 //
 // * In addition we support variable length "varint" encoding. 编码规则类似 utf-8, 具体参见代码.
+// 这里针对 uint32 的 varint encoding 与 uint64 的 varint encoding 兼容, 即总是可以使用 EncodeVarint64()
+// 来替代 EncodeVarint32(), 总是可以使用 GetVarint64() 来替代 GetVarint32().
+// 这里的 fixed-length encoding 与 varint encoding 与 golang encoding/binary 兼容.
+//
+//
 // * Strings are encoded prefixed by their length in varint format
 
 #ifndef STORAGE_LEVELDB_UTIL_CODING_H_
