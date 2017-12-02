@@ -359,6 +359,8 @@ VersionSet::~VersionSet() {
 }
 
 Status VersionSet::LogAndApply(VersionEdit* edit, MemTable* cleanup_mem) {
+    /*
+  // 我脑补的 LogAndApply() 实现.
   std::string new_manifest_file;
 
   edit->SetNextFile(next_file_number_);
@@ -426,6 +428,71 @@ Status VersionSet::LogAndApply(VersionEdit* edit, MemTable* cleanup_mem) {
   //Log(env_, options_->info_log, "State\n%s", current_->DebugString().c_str());
 
   return s;
+*/
+    edit->SetNextFile(next_file_number_);
+
+    Version* v = new Version(this);
+    {
+      Builder builder(this, current_);
+      builder.Apply(edit);
+      builder.SaveTo(v);
+    }
+
+    std::string new_manifest_file;
+    Status s = Finalize(v);
+
+    // Initialize new descriptor log file if necessary by creating
+    // a temporary file that contains a snapshot of the current version.
+    if (s.ok()) {
+      if (descriptor_log_ == NULL) {
+        assert(descriptor_file_ == NULL);
+        new_manifest_file = DescriptorFileName(dbname_, manifest_file_number_);
+        edit->SetNextFile(next_file_number_);
+        s = env_->NewWritableFile(new_manifest_file, &descriptor_file_);
+        if (s.ok()) {
+          descriptor_log_ = new log::Writer(descriptor_file_);
+          s = WriteSnapshot(descriptor_log_);
+        }
+      }
+    }
+
+    // Write new record to log file
+    if (s.ok()) {
+      std::string record;
+      edit->EncodeTo(&record);
+      s = descriptor_log_->AddRecord(record);
+      if (s.ok()) {
+        s = descriptor_file_->Sync();
+      }
+    }
+
+    // If we just created a new descriptor file, install it by writing a
+    // new CURRENT file that points to it.
+    if (s.ok() && !new_manifest_file.empty()) {
+      s = SetCurrentFile(env_, dbname_, manifest_file_number_);
+    }
+
+    // Install the new version
+    if (s.ok()) {
+      assert(current_->next_ == NULL);
+      assert(current_->cleanup_mem_ == NULL);
+      current_->cleanup_mem_ = cleanup_mem;
+      v->next_ = NULL;
+      current_->next_ = v;
+      current_ = v;
+    } else {
+      delete v;
+      if (!new_manifest_file.empty()) {
+        delete descriptor_log_;
+        delete descriptor_file_;
+        descriptor_log_ = NULL;
+        descriptor_file_ = NULL;
+        env_->DeleteFile(new_manifest_file);
+      }
+    }
+    //Log(env_, options_->info_log, "State\n%s", current_->DebugString().c_str());
+
+    return s;
 }
 
 Status VersionSet::Recover(uint64_t* log_number,

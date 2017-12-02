@@ -836,7 +836,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         last_sequence_for_key = kMaxSequenceNumber;
       }
 
-      /*
       if (last_sequence_for_key <= compact->smallest_snapshot) {
         // Hidden by an newer entry for same user key
         drop = true;    // (A)
@@ -851,8 +850,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         //     few iterations of this loop (by rule (A) above).
         // Therefore this deletion marker is obsolete and can be dropped.
         drop = true;
-      }*/
-      if (last_sequence_for_key > compact->smallest_snapshot) {
+      }
+      /* if (last_sequence_for_key > compact->smallest_snapshot) {
         if (ikey.sequence > compact->smallest_snapshot) {
           // 此时可能存在一个 snapshot, snapshot > smallest_snapshot, snapshot = ikey.sequence,
           // 当用户通过 snapshot 来读取 leveldb, 预期情况是读取到 ikey, 所以此时 drop 不能为 true.
@@ -887,7 +886,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         // 此时当用户通过 smallest_snapshot 读取 leveldb, 期望是读取到 prev internal key, 即
         // last_sequence_for_key 对应的 internal key, 所以此时 ikey 总是可以被移除.
         drop = true;
-      }
+      } */
 
       last_sequence_for_key = ikey.sequence;
     }
