@@ -143,6 +143,7 @@ void LRUCache::Unref(LRUHandle* e) {
   assert(e->refs > 0);
   e->refs--;
   if (e->refs <= 0) {
+    // 为啥要在这里才更新 usage_ 呢? 我的想法是在 Handle 从 list 中移除时就更新,
     usage_ -= e->charge;
     (*e->deleter)(e->key(), e->value);
     free(e);

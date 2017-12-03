@@ -59,3 +59,7 @@ TODO(postrelease): record following stats.
   value size (uncompressed)
   number of entries
   number of data blocks
+
+
+按我理解 metablock 的使用, 每一个 metablock 都对应着一个 name 表明这个 metablock 存放的是哪些 meta info, 如上面举例说明的 stats meta block. metaindex 使用 leveldb.BytewiseComparator 排序后存储, 这里不应该使用用户自定义的 Comparator 来排序我觉得.
+

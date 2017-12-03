@@ -38,6 +38,9 @@ class Cache {
   virtual ~Cache();
 
   // Opaque handle to an entry stored in the cache.
+  // Handle 持有着对 value 的引用, 在 ReleaseHandle() 时会检测是否还有其他 handle 引用着 value, 如果没有就会
+  // 调用 deleter 来释放 value.
+  // google 可真是喜欢 Handle 啊, v8 里面就一堆 Handle==
   struct Handle { };
 
   // Insert a mapping from key->value into the cache and assign it
@@ -79,6 +82,7 @@ class Cache {
   // sharing the same cache to partition the key space.  Typically the
   // client will allocate a new id at startup and prepend the id to
   // its cache keys.
+  // 我觉得从语义上, NewId() 放在 Cache 类中并不是很合适, 应该放在 IdGen 类中我觉得==
   virtual uint64_t NewId() = 0;
 
  private:
